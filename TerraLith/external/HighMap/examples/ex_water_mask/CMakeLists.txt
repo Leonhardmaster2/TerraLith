@@ -1,0 +1,2 @@
+add_executable(ex_water_mask ex_water_mask.cpp)
+target_link_libraries(ex_water_mask highmap)

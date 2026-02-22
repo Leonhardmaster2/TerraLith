@@ -1,0 +1,90 @@
+name: CMake on multiple platforms
+
+on:
+  push:
+    branches: [ "main", "dev", "v0.5.0-rc"]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        os: [ubuntu-latest]
+        # os: [windows-msvc]
+        build_type: [Release]
+        include:
+          #- os: windows-msvc
+          #  c_compiler: msvc
+          #  cpp_compiler: msvc
+          - os: ubuntu-latest
+            c_compiler: gcc
+            cpp_compiler: g++
+
+    steps:
+    - uses: actions/checkout@v3
+      with: 
+        submodules: recursive
+
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: "6.4.2"
+
+    - name: Install system dependencies (ubuntu)
+      if: startsWith (matrix.os, 'ubuntu')
+      run: |
+        sudo apt update
+        sudo apt-get update
+        sudo apt-get -y install libglfw3 libglfw3-dev libglew-dev libopengl-dev freeglut3-dev libglm-dev fuse libfuse2 opencl-headers ocl-icd-opencl-dev pocl-opencl-icd libassimp-dev libopencv-dev libxkbcommon-dev libspdlog-dev libfftw3-dev libgsl-dev nlohmann-json3-dev
+
+    - name: Install system dependencies (windows)
+      if: startsWith (matrix.os, 'windows')
+      run: |
+        vcpkg integrate install
+        vcpkg install 
+
+    - name: Set reusable strings
+      id: strings
+      shell: bash
+      run: |
+        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT" 
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
+        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DHESIOD_ENABLE_GENERATE_APP_IMAGE=ON
+        -DHIGHMAP_ENABLE_DOCS=OFF
+        -DHIGHMAP_ENABLE_EXAMPLES=OFF
+        -DHIGHMAP_ENABLE_TESTS=OFF
+        -DGNODE_ENABLE_DOCS=OFF
+        -DGNODE_ENABLE_EXAMPLES=OFF
+        -DGNODE_ENABLE_TESTS=OFF
+        -DGNODEGUI_ENABLE_TESTS=OFF
+        -DATTRIBUTES_ENABLE_TESTS=OFF
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: >
+        cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+
+    - name: Archive output binary (linux / non appimage)
+      if: startsWith (matrix.os, 'ubuntu')
+      uses: actions/upload-artifact@v4
+      with:
+        name: Hesiod-Binary
+        path: ${{ github.workspace }}/build/bin/hesiod
+    
+    - name: Archive output binary (linux / appimage)
+      if: startsWith (matrix.os, 'ubuntu')
+      uses: actions/upload-artifact@v4
+      with:
+        name: Hesiod-AppImage
+        path: ${{ github.workspace }}/build/bin/hesiod.AppImage

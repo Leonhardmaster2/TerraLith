@@ -1,0 +1,2 @@
+add_executable(ex_flooding_lake_system ex_flooding_lake_system.cpp)
+target_link_libraries(ex_flooding_lake_system highmap)

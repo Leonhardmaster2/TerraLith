@@ -1,0 +1,2 @@
+add_executable(ex_white_sparse ex_white_sparse.cpp)
+target_link_libraries(ex_white_sparse highmap)

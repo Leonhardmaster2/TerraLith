@@ -1,0 +1,2 @@
+add_executable(ex_thermal_auto_bedrock ex_thermal_auto_bedrock.cpp)
+target_link_libraries(ex_thermal_auto_bedrock highmap)

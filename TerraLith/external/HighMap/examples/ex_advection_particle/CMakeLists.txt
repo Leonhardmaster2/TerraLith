@@ -1,0 +1,2 @@
+add_executable(ex_advection_particle ex_advection_particle.cpp)
+target_link_libraries(ex_advection_particle highmap)

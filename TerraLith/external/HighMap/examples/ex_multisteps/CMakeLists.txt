@@ -1,0 +1,2 @@
+add_executable(ex_multisteps ex_multisteps.cpp)
+target_link_libraries(ex_multisteps highmap)

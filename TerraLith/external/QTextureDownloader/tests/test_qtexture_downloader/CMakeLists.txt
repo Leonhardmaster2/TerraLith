@@ -1,0 +1,2 @@
+add_executable(test_qtexture_downloader main.cpp)
+target_link_libraries(test_qtexture_downloader qtexture_downloader)

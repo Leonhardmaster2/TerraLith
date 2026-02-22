@@ -1,0 +1,3 @@
+[submodule "external/CLErrorLookup"]
+	path = external/CLErrorLookup
+	url = https://github.com/otto-link/CLErrorLookup.git

@@ -1,0 +1,2 @@
+add_executable(ex_water_depth_from_mask ex_water_depth_from_mask.cpp)
+target_link_libraries(ex_water_depth_from_mask highmap)

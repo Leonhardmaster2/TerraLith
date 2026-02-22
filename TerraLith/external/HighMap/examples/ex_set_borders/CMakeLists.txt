@@ -1,0 +1,2 @@
+add_executable(ex_set_borders ex_set_borders.cpp)
+target_link_libraries(ex_set_borders highmap)

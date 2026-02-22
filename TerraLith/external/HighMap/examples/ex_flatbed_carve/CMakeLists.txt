@@ -1,0 +1,2 @@
+add_executable(ex_flatbed_carve ex_flatbed_carve.cpp)
+target_link_libraries(ex_flatbed_carve highmap)

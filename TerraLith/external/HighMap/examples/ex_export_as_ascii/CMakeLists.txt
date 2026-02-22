@@ -1,0 +1,2 @@
+add_executable(ex_export_as_ascii ex_export_as_ascii.cpp)
+target_link_libraries(ex_export_as_ascii highmap)

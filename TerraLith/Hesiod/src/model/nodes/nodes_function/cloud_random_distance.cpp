@@ -1,0 +1,63 @@
+/* Copyright (c) 2023 Otto Link. Distributed under the terms of the GNU General
+ * Public License. The full license is in the file LICENSE, distributed with
+ * this software. */
+
+#include "attributes.hpp"
+
+#include "hesiod/logger.hpp"
+#include "hesiod/model/nodes/base_node.hpp"
+#include "hesiod/model/nodes/post_process.hpp"
+
+using namespace attr;
+
+namespace hesiod
+{
+
+void setup_cloud_random_distance_node(BaseNode &node)
+{
+  Logger::log()->trace("setup node {}", node.get_label());
+
+  // port(s)
+  node.add_port<hmap::Heightmap>(gnode::PortType::IN, "density");
+  node.add_port<hmap::Cloud>(gnode::PortType::OUT, "cloud");
+
+  // attribute(s)
+  node.add_attr<FloatAttribute>("distance_min", "distance_min", 0.05f, 0.001f, 0.2f);
+  node.add_attr<FloatAttribute>("distance_max", "distance_max", 0.1f, 0.001f, 1.f);
+  node.add_attr<SeedAttribute>("seed", "Seed");
+  node.add_attr<RangeAttribute>("remap", "remap");
+
+  // attribute(s) order
+  node.set_attr_ordered_key(
+      {"distance_min", "distance_max", "seed", "_SEPARATOR_", "remap"});
+}
+
+void compute_cloud_random_distance_node(BaseNode &node)
+{
+  Logger::log()->trace("computing node [{}]/[{}]", node.get_label(), node.get_id());
+
+  hmap::Heightmap *p_density = node.get_value_ref<hmap::Heightmap>("density");
+  hmap::Cloud     *p_out = node.get_value_ref<hmap::Cloud>("cloud");
+
+  if (p_density)
+  {
+    // TODO distribute
+    hmap::Array density_array = p_density->to_array();
+
+    *p_out = hmap::random_cloud_distance(node.get_attr<FloatAttribute>("distance_min"),
+                                         node.get_attr<FloatAttribute>("distance_max"),
+                                         density_array,
+                                         node.get_attr<SeedAttribute>("seed"));
+  }
+  else
+  {
+    *p_out = hmap::random_cloud_distance(node.get_attr<FloatAttribute>("distance_min"),
+                                         node.get_attr<SeedAttribute>("seed"));
+  }
+
+  if (node.get_attr_ref<RangeAttribute>("remap")->get_is_active())
+    p_out->remap_values(node.get_attr<RangeAttribute>("remap")[0],
+                        node.get_attr<RangeAttribute>("remap")[1]);
+}
+
+} // namespace hesiod

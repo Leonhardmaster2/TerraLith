@@ -1,0 +1,2 @@
+add_executable(ex_hemisphere_field ex_hemisphere_field.cpp)
+target_link_libraries(ex_hemisphere_field highmap)

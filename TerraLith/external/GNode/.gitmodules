@@ -1,0 +1,3 @@
+[submodule "external/demekgraph"]
+	path = external/demekgraph
+	url = https://github.com/gml4gtk/demekgraph.git

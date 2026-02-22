@@ -1,0 +1,2 @@
+add_executable(ex_select_soil_weathered ex_select_soil_weathered.cpp)
+target_link_libraries(ex_select_soil_weathered highmap)

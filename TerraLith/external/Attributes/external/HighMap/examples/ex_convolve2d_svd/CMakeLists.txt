@@ -1,0 +1,2 @@
+add_executable(ex_convolve2d_svd ex_convolve2d_svd.cpp)
+target_link_libraries(ex_convolve2d_svd highmap)

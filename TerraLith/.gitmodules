@@ -1,0 +1,21 @@
+[submodule "external/HighMap"]
+	path = external/HighMap
+	url = https://github.com/otto-link/HighMap.git
+[submodule "external/args"]
+	path = external/args
+	url = https://github.com/Taywee/args.git
+[submodule "external/GNodeGUI"]
+	path = external/GNodeGUI
+	url = https://github.com/otto-link/GNodeGUI.git
+[submodule "external/GNode"]
+	path = external/GNode
+	url = https://github.com/otto-link/GNode.git
+[submodule "external/Attributes"]
+	path = external/Attributes
+	url = https://github.com/otto-link/Attributes.git
+[submodule "external/QTerrainRenderer"]
+	path = external/QTerrainRenderer
+	url = https://github.com/otto-link/QTerrainRenderer.git
+[submodule "external/QTextureDownloader"]
+	path = external/QTextureDownloader
+	url = https://github.com/otto-link/QTextureDownloader.git

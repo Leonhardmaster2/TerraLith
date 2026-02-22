@@ -1,0 +1,2 @@
+add_executable(ex_shattered_peak ex_shattered_peak.cpp)
+target_link_libraries(ex_shattered_peak highmap)

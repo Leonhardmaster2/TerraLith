@@ -1,0 +1,2 @@
+add_executable(ex_distance_transform ex_distance_transform.cpp)
+target_link_libraries(ex_distance_transform highmap)

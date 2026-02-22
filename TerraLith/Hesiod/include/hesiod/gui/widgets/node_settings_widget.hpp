@@ -1,0 +1,48 @@
+/* Copyright (c) 2025 Otto Link. Distributed under the terms of the GNU General Public
+   License. The full license is in the file LICENSE, distributed with this software. */
+#pragma once
+#include <QCheckBox>
+#include <QPointer>
+#include <QPushButton>
+#include <QVBoxLayout>
+
+#include "hesiod/gui/widgets/graph_node_widget.hpp"
+
+namespace hesiod
+{
+
+class GraphNode; // forward
+
+// =====================================
+// NodeSettingsWidget
+// =====================================
+class NodeSettingsWidget : public QWidget
+{
+  Q_OBJECT
+
+public:
+  NodeSettingsWidget(QPointer<GraphNodeWidget> p_graph_node_widget,
+                     QWidget                  *parent = nullptr);
+
+  // Query whether auto-update is enabled (used by NodeAttributesWidget)
+  bool is_auto_update_enabled() const;
+
+  // Force a full graph build (called by the Force Build button)
+  void force_build();
+
+private:
+  void setup_connections();
+  void setup_layout();
+  void update_content();
+
+  // --- Members ---
+  QPointer<GraphNodeWidget> p_graph_node_widget; // own by GraphManagerWidget
+  QVBoxLayout              *attr_layout;
+  std::vector<std::string>  pinned_node_ids;
+
+  // Auto-Update vs Manual toggle
+  QCheckBox   *auto_update_checkbox = nullptr;
+  QPushButton *force_build_button = nullptr;
+};
+
+} // namespace hesiod

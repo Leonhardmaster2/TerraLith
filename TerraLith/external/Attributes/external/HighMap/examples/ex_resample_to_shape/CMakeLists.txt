@@ -1,0 +1,2 @@
+add_executable(ex_resample_to_shape ex_resample_to_shape.cpp)
+target_link_libraries(ex_resample_to_shape highmap)

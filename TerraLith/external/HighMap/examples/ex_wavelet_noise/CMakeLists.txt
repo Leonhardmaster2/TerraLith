@@ -1,0 +1,2 @@
+add_executable(ex_wavelet_noise ex_wavelet_noise.cpp)
+target_link_libraries(ex_wavelet_noise highmap)

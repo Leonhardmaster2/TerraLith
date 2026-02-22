@@ -1,0 +1,2 @@
+add_executable(ex_convolve1d_ij ex_convolve1d_ij.cpp)
+target_link_libraries(ex_convolve1d_ij highmap)

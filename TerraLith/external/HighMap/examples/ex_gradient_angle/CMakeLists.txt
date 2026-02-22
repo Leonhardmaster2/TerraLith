@@ -1,0 +1,2 @@
+add_executable(ex_gradient_angle ex_gradient_angle.cpp)
+target_link_libraries(ex_gradient_angle highmap)

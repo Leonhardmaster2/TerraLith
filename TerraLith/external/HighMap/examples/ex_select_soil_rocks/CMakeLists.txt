@@ -1,0 +1,2 @@
+add_executable(ex_select_soil_rocks ex_select_soil_rocks.cpp)
+target_link_libraries(ex_select_soil_rocks highmap)

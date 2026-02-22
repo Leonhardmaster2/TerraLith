@@ -1,0 +1,2 @@
+add_executable(ex_reverse_above_theshold ex_reverse_above_theshold.cpp)
+target_link_libraries(ex_reverse_above_theshold highmap)

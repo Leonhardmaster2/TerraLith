@@ -1,0 +1,2 @@
+add_executable(ex_perturb_mask_contour ex_perturb_mask_contour.cpp)
+target_link_libraries(ex_perturb_mask_contour highmap)

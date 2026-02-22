@@ -1,0 +1,7 @@
+﻿build/
+CMakeFiles/
+*.user
+.vs/
+bin/
+out/
+nul

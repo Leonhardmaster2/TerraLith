@@ -1,0 +1,2 @@
+add_executable(ex_signed_curvature_from_distance ex_signed_curvature_from_distance.cpp)
+target_link_libraries(ex_signed_curvature_from_distance highmap)

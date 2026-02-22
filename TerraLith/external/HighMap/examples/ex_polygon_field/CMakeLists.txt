@@ -1,0 +1,2 @@
+add_executable(ex_polygon_field ex_polygon_field.cpp)
+target_link_libraries(ex_polygon_field highmap)

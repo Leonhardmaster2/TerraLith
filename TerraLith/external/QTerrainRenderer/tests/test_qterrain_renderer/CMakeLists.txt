@@ -1,0 +1,2 @@
+add_executable(test_qterrain_renderer main.cpp)
+target_link_libraries(test_qterrain_renderer qterrain-renderer)

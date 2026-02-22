@@ -1,0 +1,2 @@
+add_executable(ex_get_primitive_base ex_get_primitive_base.cpp)
+target_link_libraries(ex_get_primitive_base highmap)

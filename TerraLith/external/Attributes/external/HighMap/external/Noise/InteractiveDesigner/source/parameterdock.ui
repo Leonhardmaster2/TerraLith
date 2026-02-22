@@ -1,0 +1,426 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>ParameterDock</class>
+ <widget class="QDockWidget" name="ParameterDock">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>400</width>
+    <height>670</height>
+   </rect>
+  </property>
+  <property name="windowTitle">
+   <string>Parameters</string>
+  </property>
+  <widget class="QWidget" name="widget">
+   <layout class="QFormLayout" name="formLayout_2">
+    <item row="1" column="0">
+     <widget class="QLabel" name="seedLabel">
+      <property name="text">
+       <string>Seed</string>
+      </property>
+     </widget>
+    </item>
+    <item row="1" column="1">
+     <widget class="QSpinBox" name="seedSpinBox">
+      <property name="minimum">
+       <number>-65535</number>
+      </property>
+      <property name="maximum">
+       <number>65535</number>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="0">
+     <widget class="QLabel" name="widthResolutionLabel">
+      <property name="text">
+       <string>Width resolution</string>
+      </property>
+     </widget>
+    </item>
+    <item row="2" column="1">
+     <widget class="QSpinBox" name="widthResolutionSpinBox">
+      <property name="suffix">
+       <string> px</string>
+      </property>
+      <property name="maximum">
+       <number>16384</number>
+      </property>
+      <property name="value">
+       <number>512</number>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="0">
+     <widget class="QLabel" name="heightResolutionLabel">
+      <property name="text">
+       <string>Height resolution</string>
+      </property>
+     </widget>
+    </item>
+    <item row="3" column="1">
+     <widget class="QSpinBox" name="heightResolutionSpinBox">
+      <property name="suffix">
+       <string> px</string>
+      </property>
+      <property name="maximum">
+       <number>16384</number>
+      </property>
+      <property name="value">
+       <number>512</number>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="0">
+     <widget class="QLabel" name="levelLabel">
+      <property name="text">
+       <string>Levels</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="1">
+     <widget class="QSpinBox" name="levelSpinBox">
+      <property name="minimum">
+       <number>1</number>
+      </property>
+      <property name="maximum">
+       <number>6</number>
+      </property>
+      <property name="value">
+       <number>1</number>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="0">
+     <widget class="QLabel" name="epsilonLabel">
+      <property name="text">
+       <string>Epsilon</string>
+      </property>
+     </widget>
+    </item>
+    <item row="5" column="1">
+     <widget class="QDoubleSpinBox" name="epsilonDoubleSpinBox">
+      <property name="maximum">
+       <double>0.500000000000000</double>
+      </property>
+      <property name="singleStep">
+       <double>0.050000000000000</double>
+      </property>
+      <property name="value">
+       <double>0.100000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="7" column="0">
+     <widget class="QLabel" name="noiseTopLabel">
+      <property name="text">
+       <string>Noise Top</string>
+      </property>
+     </widget>
+    </item>
+    <item row="7" column="1">
+     <widget class="QDoubleSpinBox" name="noiseTopDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="singleStep">
+       <double>1.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>-3.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="8" column="0">
+     <widget class="QLabel" name="noiseBottomLabel">
+      <property name="text">
+       <string>Noise Bottom</string>
+      </property>
+     </widget>
+    </item>
+    <item row="8" column="1">
+     <widget class="QDoubleSpinBox" name="noiseBottomDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>2.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="9" column="0">
+     <widget class="QLabel" name="noiseLeftLabel">
+      <property name="text">
+       <string>Noise Left</string>
+      </property>
+     </widget>
+    </item>
+    <item row="9" column="1">
+     <widget class="QDoubleSpinBox" name="noiseLeftDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>-3.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="0">
+     <widget class="QLabel" name="noiseRightLabel">
+      <property name="text">
+       <string>Noise Right</string>
+      </property>
+     </widget>
+    </item>
+    <item row="10" column="1">
+     <widget class="QDoubleSpinBox" name="noiseRightDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>2.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="0">
+     <widget class="QLabel" name="controlFunctionTopLabel">
+      <property name="text">
+       <string>Control Function Top</string>
+      </property>
+     </widget>
+    </item>
+    <item row="11" column="1">
+     <widget class="QDoubleSpinBox" name="controlFunctionTopDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>-1.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="12" column="0">
+     <widget class="QLabel" name="controlFunctionBottomLabel">
+      <property name="text">
+       <string>Control Function Bottom</string>
+      </property>
+     </widget>
+    </item>
+    <item row="12" column="1">
+     <widget class="QDoubleSpinBox" name="controlFunctionBottomDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>1.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="13" column="0">
+     <widget class="QLabel" name="controlFunctionLeftLabel">
+      <property name="text">
+       <string>Control Function Left</string>
+      </property>
+     </widget>
+    </item>
+    <item row="13" column="1">
+     <widget class="QDoubleSpinBox" name="controlFunctionLeftDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>-1.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="14" column="0">
+     <widget class="QLabel" name="controlFunctionRightLabel">
+      <property name="text">
+       <string>Control Function Right</string>
+      </property>
+     </widget>
+    </item>
+    <item row="14" column="1">
+     <widget class="QDoubleSpinBox" name="controlFunctionRightDoubleSpinBox">
+      <property name="minimum">
+       <double>-1024.000000000000000</double>
+      </property>
+      <property name="maximum">
+       <double>1024.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>1.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="0">
+     <widget class="QLabel" name="displacementLabel">
+      <property name="text">
+       <string>Displacement</string>
+      </property>
+     </widget>
+    </item>
+    <item row="6" column="1">
+     <widget class="QDoubleSpinBox" name="displacementDoubleSpinBox">
+      <property name="decimals">
+       <number>3</number>
+      </property>
+      <property name="maximum">
+       <double>5.000000000000000</double>
+      </property>
+      <property name="singleStep">
+       <double>0.001000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="0">
+     <widget class="QLabel" name="typeLabel">
+      <property name="text">
+       <string>Type</string>
+      </property>
+     </widget>
+    </item>
+    <item row="0" column="1">
+     <widget class="QComboBox" name="typeComboBox">
+      <item>
+       <property name="text">
+        <string>Terrain</string>
+       </property>
+      </item>
+      <item>
+       <property name="text">
+        <string>Lichtenberg</string>
+       </property>
+      </item>
+     </widget>
+    </item>
+    <item row="15" column="0">
+     <widget class="QLabel" name="primitivesResolutionStepsLabel">
+      <property name="text">
+       <string>Terrain Generation Steps</string>
+      </property>
+     </widget>
+    </item>
+    <item row="15" column="1">
+     <widget class="QSpinBox" name="primitivesResolutionStepsSpinBox">
+      <property name="minimum">
+       <number>1</number>
+      </property>
+      <property name="maximum">
+       <number>8</number>
+      </property>
+      <property name="value">
+       <number>3</number>
+      </property>
+     </widget>
+    </item>
+    <item row="16" column="0">
+     <widget class="QLabel" name="slopePowerLabel">
+      <property name="text">
+       <string>Terrain Slope Power</string>
+      </property>
+     </widget>
+    </item>
+    <item row="16" column="1">
+     <widget class="QDoubleSpinBox" name="slopePowerDoubleSpinBox">
+      <property name="maximum">
+       <double>10.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>1.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="18" column="0">
+     <widget class="QLabel" name="controlScaleLabel">
+      <property name="text">
+       <string>Terrain Control Scale</string>
+      </property>
+     </widget>
+    </item>
+    <item row="18" column="1">
+     <widget class="QDoubleSpinBox" name="controlScaleDoubleSpinBox">
+      <property name="decimals">
+       <number>3</number>
+      </property>
+      <property name="maximum">
+       <double>100.000000000000000</double>
+      </property>
+      <property name="value">
+       <double>1.000000000000000</double>
+      </property>
+     </widget>
+    </item>
+    <item row="17" column="0">
+     <widget class="QLabel" name="noiseAmplitudeProportionLabel">
+      <property name="text">
+       <string>Terrain Noise Amplitude</string>
+      </property>
+     </widget>
+    </item>
+    <item row="17" column="1">
+     <widget class="QDoubleSpinBox" name="noiseAmplitudeProportionDoubleSpinBox">
+      <property name="decimals">
+       <number>3</number>
+      </property>
+      <property name="maximum">
+       <double>1.000000000000000</double>
+      </property>
+      <property name="singleStep">
+       <double>0.001000000000000</double>
+      </property>
+      <property name="value">
+       <double>0.050000000000000</double>
+      </property>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <layoutdefault spacing="6" margin="11"/>
+ <tabstops>
+  <tabstop>typeComboBox</tabstop>
+  <tabstop>seedSpinBox</tabstop>
+  <tabstop>widthResolutionSpinBox</tabstop>
+  <tabstop>heightResolutionSpinBox</tabstop>
+  <tabstop>levelSpinBox</tabstop>
+  <tabstop>epsilonDoubleSpinBox</tabstop>
+  <tabstop>displacementDoubleSpinBox</tabstop>
+  <tabstop>noiseTopDoubleSpinBox</tabstop>
+  <tabstop>noiseBottomDoubleSpinBox</tabstop>
+  <tabstop>noiseLeftDoubleSpinBox</tabstop>
+  <tabstop>noiseRightDoubleSpinBox</tabstop>
+  <tabstop>controlFunctionTopDoubleSpinBox</tabstop>
+  <tabstop>controlFunctionBottomDoubleSpinBox</tabstop>
+  <tabstop>controlFunctionLeftDoubleSpinBox</tabstop>
+  <tabstop>controlFunctionRightDoubleSpinBox</tabstop>
+  <tabstop>primitivesResolutionStepsSpinBox</tabstop>
+  <tabstop>slopePowerDoubleSpinBox</tabstop>
+  <tabstop>noiseAmplitudeProportionDoubleSpinBox</tabstop>
+  <tabstop>controlScaleDoubleSpinBox</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,2 @@
+add_executable(ex_find_cut_path ex_find_cut_path.cpp)
+target_link_libraries(ex_find_cut_path highmap)

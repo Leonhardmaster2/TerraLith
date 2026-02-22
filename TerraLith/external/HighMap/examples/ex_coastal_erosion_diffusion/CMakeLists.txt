@@ -1,0 +1,2 @@
+add_executable(ex_coastal_erosion_diffusion ex_coastal_erosion_diffusion.cpp)
+target_link_libraries(ex_coastal_erosion_diffusion highmap)

@@ -1,0 +1,8 @@
+.cache/
+.vs/
+.zed/
+bin/
+build/
+launch.json
+.idea/
+.vscode/
