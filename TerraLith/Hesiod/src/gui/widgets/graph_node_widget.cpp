@@ -23,6 +23,7 @@
 #include "hesiod/gui/widgets/custom_qmenu.hpp"
 #include "hesiod/gui/widgets/graph_config_dialog.hpp"
 #include "hesiod/gui/widgets/graph_node_widget.hpp"
+#include "hesiod/gui/workers/graph_worker.hpp"
 #include "hesiod/gui/widgets/gui_utils.hpp"
 #include "hesiod/gui/widgets/node_attributes_widget.hpp"
 #include "hesiod/gui/widgets/node_info_dialog.hpp"
@@ -111,6 +112,9 @@ GraphNodeWidget::GraphNodeWidget(std::weak_ptr<GraphNode> p_graph_node, QWidget 
 GraphNodeWidget::~GraphNodeWidget()
 {
   Logger::log()->trace("GraphNodeWidget::~GraphNodeWidget");
+
+  // cancel any running background compute
+  this->cancel_background_compute();
 
   // clean-up, viewer are not owned by this
   this->clear_data_viewers();
@@ -387,7 +391,17 @@ nlohmann::json GraphNodeWidget::json_import(nlohmann::json const &json, QPointF 
         gno->new_link(node_id_from, port_out_id, node_id_to, port_in_id);
       }
 
-    gno->update();
+    // background compute: mark all dirty, sort, dispatch
+    {
+      std::vector<std::string> dirty_ids;
+      for (auto &[nid, _] : gno->get_nodes())
+      {
+        gno->get_node_ref_by_id(nid)->is_dirty = true;
+        dirty_ids.push_back(nid);
+      }
+      auto sorted = gno->topological_sort(dirty_ids);
+      this->start_background_compute(sorted);
+    }
   }
 
   return json_copy;
@@ -415,6 +429,9 @@ void GraphNodeWidget::on_connection_deleted(const std::string &id_out,
                                             const std::string &port_id_in,
                                             bool               prevent_graph_update)
 {
+  if (this->is_computing_)
+    return;
+
   Logger::log()->trace("GraphNodeWidget::on_connection_deleted, {}/{} -> {}/{}",
                        id_out,
                        port_id_out,
@@ -438,9 +455,14 @@ void GraphNodeWidget::on_connection_deleted(const std::string &id_out,
   // Only trigger graph update if the destination node still exists in the graph
   // (it may have been removed during a batch-delete operation)
   if (!prevent_graph_update && !gno->is_node_id_available(id_in))
-    gno->update(id_in);
-
-  this->set_enabled(true);
+  {
+    auto sorted = gno->get_nodes_to_update(id_in);
+    this->start_background_compute(sorted);
+  }
+  else
+  {
+    this->set_enabled(true);
+  }
 }
 
 void GraphNodeWidget::on_connection_dropped(const std::string &node_id,
@@ -501,6 +523,9 @@ void GraphNodeWidget::on_connection_finished(const std::string &id_out,
                                              const std::string &id_in,
                                              const std::string &port_id_in)
 {
+  if (this->is_computing_)
+    return;
+
   Logger::log()->trace("GraphNodeWidget::on_connection_finished, {}/{} -> {}/{}",
                        id_out,
                        port_id_out,
@@ -516,11 +541,17 @@ void GraphNodeWidget::on_connection_finished(const std::string &id_out,
   // no update for instance during deserialization to avoid a full
   // graph update at each link creation
   if (this->update_node_on_connection_finished)
-    gno->update(id_in);
+  {
+    auto sorted = gno->get_nodes_to_update(id_in);
+    this->start_background_compute(sorted);
+  }
 }
 
 void GraphNodeWidget::on_graph_clear_request()
 {
+  if (this->is_computing_)
+    return;
+
   Logger::log()->trace("GraphNodeWidget::on_graph_clear_request");
 
   QMessageBox::StandardButton reply = QMessageBox::question(
@@ -647,11 +678,22 @@ void GraphNodeWidget::on_graph_reload_request()
   if (!gno)
     return;
 
-  gno->update();
+  // full update: mark all dirty, sort, dispatch
+  std::vector<std::string> dirty_ids;
+  for (auto &[nid, _] : gno->get_nodes())
+  {
+    gno->get_node_ref_by_id(nid)->is_dirty = true;
+    dirty_ids.push_back(nid);
+  }
+  auto sorted = gno->topological_sort(dirty_ids);
+  this->start_background_compute(sorted);
 }
 
 void GraphNodeWidget::on_graph_settings_request()
 {
+  if (this->is_computing_)
+    return;
+
   Logger::log()->trace("GraphNodeWidget::on_graph_settings_request");
 
   auto gno = this->p_graph_node.lock();
@@ -712,6 +754,9 @@ void GraphNodeWidget::on_new_graphics_node_request(const std::string &node_id,
 std::string GraphNodeWidget::on_new_node_request(const std::string &node_type,
                                                  QPointF            scene_pos)
 {
+  if (this->is_computing_)
+    return "";
+
   Logger::log()->trace("GraphNodeWidget::on_new_node_request: node_type {}", node_type);
 
   auto gno = this->p_graph_node.lock();
@@ -833,11 +878,17 @@ void GraphNodeWidget::on_node_dropped_on_link(const std::string &dropped_node_id
   gno->new_link(dropped_node_id, dropped_out_port_id, link_in_id, link_in_port_id);
 
   // 4. Trigger graph update from the dropped node
-  gno->update(dropped_node_id);
+  {
+    auto sorted = gno->get_nodes_to_update(dropped_node_id);
+    this->start_background_compute(sorted);
+  }
 }
 
 void GraphNodeWidget::on_node_deleted_request(const std::string &node_id)
 {
+  if (this->is_computing_)
+    return;
+
   Logger::log()->trace("GraphNodeWidget::on_node_deleted_request, node {}", node_id);
 
   auto gno = this->p_graph_node.lock();
@@ -905,7 +956,8 @@ void GraphNodeWidget::on_node_reload_request(const std::string &node_id)
   if (!gno)
     return;
 
-  gno->update(node_id);
+  auto sorted = gno->get_nodes_to_update(node_id);
+  this->start_background_compute(sorted);
 }
 
 void GraphNodeWidget::on_node_right_clicked(const std::string &node_id, QPointF scene_pos)
@@ -1123,6 +1175,14 @@ void GraphNodeWidget::reselect_backup_ids()
 
 void GraphNodeWidget::keyPressEvent(QKeyEvent *event)
 {
+  // Cancel background compute on Escape
+  if (event->key() == Qt::Key_Escape && this->is_computing_)
+  {
+    this->cancel_background_compute();
+    event->accept();
+    return;
+  }
+
   // Intercept Delete/Backspace to go through the undo stack
   if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace)
   {
@@ -1256,6 +1316,209 @@ void GraphNodeWidget::on_redo_request()
 void GraphNodeWidget::set_json_copy_buffer(nlohmann::json const &new_json_copy_buffer)
 {
   this->json_copy_buffer = new_json_copy_buffer;
+}
+
+// =====================================
+// Background Compute
+// =====================================
+
+bool GraphNodeWidget::is_computing() const { return this->is_computing_; }
+
+void GraphNodeWidget::force_build()
+{
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return;
+
+  std::vector<std::string> dirty_ids;
+  for (auto &[nid, _] : gno->get_nodes())
+  {
+    gno->get_node_ref_by_id(nid)->is_dirty = true;
+    dirty_ids.push_back(nid);
+  }
+  auto sorted = gno->topological_sort(dirty_ids);
+  this->start_background_compute(sorted);
+}
+
+void GraphNodeWidget::start_background_compute(const std::vector<std::string> &sorted_ids)
+{
+  if (sorted_ids.empty())
+    return;
+
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return;
+
+  if (this->is_computing_)
+  {
+    Logger::log()->warn("GraphNodeWidget::start_background_compute: already running");
+    return;
+  }
+
+  this->is_computing_ = true;
+  this->setEnabled(false);
+
+  // Suppress GraphNode callbacks to avoid double-signaling from worker thread
+  this->saved_compute_started_ = gno->compute_started;
+  this->saved_compute_finished_ = gno->compute_finished;
+  this->saved_update_started_ = gno->update_started;
+  this->saved_update_finished_ = gno->update_finished;
+  this->saved_update_progress_ = gno->update_progress;
+
+  gno->compute_started = nullptr;
+  gno->compute_finished = nullptr;
+  gno->update_started = nullptr;
+  gno->update_finished = nullptr;
+  gno->update_progress = nullptr;
+
+  Q_EMIT this->update_started();
+
+  // Create worker and thread
+  this->worker_thread_ = new QThread(this);
+  this->graph_worker_ = new GraphWorker(); // no parent -- will be moved
+
+  this->graph_worker_->configure(gno.get(), sorted_ids);
+  this->graph_worker_->moveToThread(this->worker_thread_);
+
+  // Connect worker signals to widget slots (auto queued cross-thread)
+  connect(this->graph_worker_,
+          &GraphWorker::node_compute_started,
+          this,
+          &GraphNodeWidget::on_worker_node_compute_started);
+  connect(this->graph_worker_,
+          &GraphWorker::node_compute_finished,
+          this,
+          &GraphNodeWidget::on_worker_node_compute_finished);
+  connect(this->graph_worker_,
+          &GraphWorker::progress_updated,
+          this,
+          &GraphNodeWidget::on_worker_progress_updated);
+  connect(this->graph_worker_,
+          &GraphWorker::node_execution_time,
+          this,
+          &GraphNodeWidget::on_worker_node_execution_time);
+  connect(this->graph_worker_,
+          &GraphWorker::compute_all_finished,
+          this,
+          &GraphNodeWidget::on_worker_compute_all_finished);
+
+  // Start work when thread starts
+  connect(this->worker_thread_,
+          &QThread::started,
+          this->graph_worker_,
+          &GraphWorker::do_compute);
+
+  // Clean up when done
+  connect(this->graph_worker_,
+          &GraphWorker::compute_all_finished,
+          this->worker_thread_,
+          &QThread::quit);
+  connect(this->worker_thread_,
+          &QThread::finished,
+          this->graph_worker_,
+          &QObject::deleteLater);
+  connect(this->worker_thread_,
+          &QThread::finished,
+          this->worker_thread_,
+          &QObject::deleteLater);
+
+  this->worker_thread_->start();
+}
+
+void GraphNodeWidget::cancel_background_compute()
+{
+  if (this->graph_worker_)
+    this->graph_worker_->request_cancel();
+
+  if (this->worker_thread_ && this->worker_thread_->isRunning())
+    this->worker_thread_->wait(5000);
+}
+
+void GraphNodeWidget::on_worker_node_compute_started(const std::string &node_id)
+{
+  gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(node_id);
+  if (p_gfx)
+    p_gfx->on_compute_started();
+
+  Q_EMIT this->compute_started(node_id);
+}
+
+void GraphNodeWidget::on_worker_node_compute_finished(const std::string &node_id)
+{
+  gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(node_id);
+  if (p_gfx)
+  {
+    p_gfx->on_compute_finished();
+
+    if (HSD_CTX.app_settings.interface.enable_node_settings_in_node_body)
+      p_gfx->update();
+  }
+
+  Q_EMIT this->compute_finished(node_id);
+}
+
+void GraphNodeWidget::on_worker_progress_updated(const std::string &node_id,
+                                                 float              percent)
+{
+  gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(node_id);
+  if (p_gfx)
+    p_gfx->set_build_progress(static_cast<int>(percent));
+
+  Q_EMIT this->update_progress(node_id, percent);
+}
+
+void GraphNodeWidget::on_worker_node_execution_time(const std::string &node_id,
+                                                    float              time_ms)
+{
+  gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(node_id);
+  if (p_gfx)
+    p_gfx->set_last_execution_time(time_ms);
+}
+
+void GraphNodeWidget::on_worker_compute_all_finished(bool was_cancelled)
+{
+  // Restore suppressed callbacks
+  auto gno = this->p_graph_node.lock();
+  if (gno)
+  {
+    gno->compute_started = this->saved_compute_started_;
+    gno->compute_finished = this->saved_compute_finished_;
+    gno->update_started = this->saved_update_started_;
+    gno->update_finished = this->saved_update_finished_;
+    gno->update_progress = this->saved_update_progress_;
+  }
+  this->saved_compute_started_ = nullptr;
+  this->saved_compute_finished_ = nullptr;
+  this->saved_update_started_ = nullptr;
+  this->saved_update_finished_ = nullptr;
+  this->saved_update_progress_ = nullptr;
+
+  this->is_computing_ = false;
+  this->setEnabled(true);
+
+  // Reset progress bars
+  if (gno)
+  {
+    for (auto &[nid, _] : gno->get_nodes())
+    {
+      gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(nid);
+      if (p_gfx)
+        p_gfx->set_build_progress(0);
+    }
+  }
+
+  Q_EMIT this->update_finished();
+
+  // Clean up references (objects will be deleted by deleteLater)
+  this->worker_thread_ = nullptr;
+  this->graph_worker_ = nullptr;
+
+  // Call post_update on the graph
+  if (gno)
+    gno->post_update();
+
+  if (was_cancelled)
+    Logger::log()->info("GraphNodeWidget: compute was cancelled");
 }
 
 void GraphNodeWidget::setup_connections()

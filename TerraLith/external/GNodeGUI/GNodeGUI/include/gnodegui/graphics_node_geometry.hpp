@@ -34,6 +34,14 @@ public:
   std::vector<QRectF> port_rects;     // visual port circles (for paint)
   std::vector<QRectF> port_hit_rects; // expanded hitboxes (for hover/click detection)
 
+  // Geometry metrics (used by GraphicsNode for painting)
+  float line_height = 0.f;
+  float margin = 0.f;
+  float header_gap = 0.f;
+  float node_width = 0.f;
+  float comment_height = 0.f;
+  float ports_end_y = 0.f;
+
 private:
   void compute_base_metrics(QFontMetrics &fm);
 
@@ -46,14 +54,6 @@ private:
   void compute_widget_position();
 
   NodeProxy *p_node_proxy; // Pointer to the associated node proxy
-
-  float line_height;
-  float margin;
-  float header_gap;
-  float node_width;
-  float comment_height;
-
-  float ports_end_y;
 };
 
 } // namespace gngui

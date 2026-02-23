@@ -46,11 +46,7 @@ void NodeSettingsWidget::force_build()
   if (!this->p_graph_node_widget)
     return;
 
-  GraphNode *p_gno = this->p_graph_node_widget->get_p_graph_node();
-  if (!p_gno)
-    return;
-
-  p_gno->update();
+  this->p_graph_node_widget->force_build();
 }
 
 void NodeSettingsWidget::setup_connections()
