@@ -79,6 +79,8 @@ void BaseNode::compute()
     try
     {
       handled = this->compute_vulkan_fct(*this);
+      if (handled)
+        this->runtime_info.last_backend_used = ComputeBackend::VULKAN;
     }
     catch (const std::exception &e)
     {
@@ -93,6 +95,7 @@ void BaseNode::compute()
 
   if (!handled)
   {
+    this->runtime_info.last_backend_used = ComputeBackend::CPU;
     if (this->compute_fct)
       this->compute_fct(*this);
     else
@@ -589,6 +592,11 @@ void BaseNode::set_compute_vulkan_fct(std::function<bool(BaseNode &node)> fct)
 bool BaseNode::supports_vulkan_compute() const
 {
   return this->compute_vulkan_fct != nullptr;
+}
+
+ComputeBackend BaseNode::get_last_backend_used() const
+{
+  return this->runtime_info.last_backend_used;
 }
 
 void BaseNode::set_id(const std::string &new_id) { gnode::Node::set_id(new_id); }

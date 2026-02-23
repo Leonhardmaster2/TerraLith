@@ -1468,11 +1468,15 @@ void GraphNodeWidget::on_worker_progress_updated(const std::string &node_id,
 }
 
 void GraphNodeWidget::on_worker_node_execution_time(const std::string &node_id,
-                                                    float              time_ms)
+                                                    float              time_ms,
+                                                    int                backend_type)
 {
   gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(node_id);
   if (p_gfx)
+  {
     p_gfx->set_last_execution_time(time_ms);
+    p_gfx->set_last_backend_type(backend_type);
+  }
 }
 
 void GraphNodeWidget::on_worker_compute_all_finished(bool was_cancelled)

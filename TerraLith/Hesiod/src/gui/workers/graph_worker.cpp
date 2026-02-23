@@ -70,9 +70,15 @@ void GraphWorker::do_compute()
     float elapsed_ms =
         std::chrono::duration<float, std::milli>(t1 - t0).count();
 
+    // Read which backend was used (CPU, Vulkan, etc.)
+    int backend_type = 0; // ComputeBackend::NONE
+    BaseNode *p_base = dynamic_cast<BaseNode *>(p_node);
+    if (p_base)
+      backend_type = static_cast<int>(p_base->get_last_backend_used());
+
     // Signal: compute finished + execution time
     Q_EMIT this->node_compute_finished(nid);
-    Q_EMIT this->node_execution_time(nid, elapsed_ms);
+    Q_EMIT this->node_execution_time(nid, elapsed_ms, backend_type);
 
     // Progress after compute
     float progress_after =

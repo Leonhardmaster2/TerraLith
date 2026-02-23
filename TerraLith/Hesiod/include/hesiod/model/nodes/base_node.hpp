@@ -58,6 +58,7 @@ public:
   void set_compute_fct(std::function<void(BaseNode &node)> new_compute_fct);
   void set_compute_vulkan_fct(std::function<bool(BaseNode &node)> fct);
   bool supports_vulkan_compute() const;
+  ComputeBackend get_last_backend_used() const;
 
   // --- Serialization ---
   virtual void           json_from(nlohmann::json const &json);

@@ -130,7 +130,7 @@ private slots:
   void on_worker_node_compute_started(const std::string &node_id);
   void on_worker_node_compute_finished(const std::string &node_id);
   void on_worker_progress_updated(const std::string &node_id, float percent);
-  void on_worker_node_execution_time(const std::string &node_id, float time_ms);
+  void on_worker_node_execution_time(const std::string &node_id, float time_ms, int backend_type);
   void on_worker_compute_all_finished(bool was_cancelled);
 
 private:
