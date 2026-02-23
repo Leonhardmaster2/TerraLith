@@ -10,6 +10,15 @@
   void setup_##node_type##_node(BaseNode &node);                                         \
   void compute_##node_type##_node(BaseNode &node);
 
+#ifdef HESIOD_HAS_VULKAN
+#define DECLARE_NODE_VULKAN(node_type)                                                   \
+  void setup_##node_type##_node(BaseNode &node);                                         \
+  void compute_##node_type##_node(BaseNode &node);                                       \
+  bool compute_##node_type##_node_vulkan(BaseNode &node);
+#else
+#define DECLARE_NODE_VULKAN(node_type) DECLARE_NODE(node_type)
+#endif
+
 namespace hesiod
 {
 
@@ -172,7 +181,7 @@ DECLARE_NODE(mountain_range_radial)
 DECLARE_NODE(mountain_stump)
 DECLARE_NODE(mountain_tibesti)
 DECLARE_NODE(multisteps)
-DECLARE_NODE(noise_fbm)
+DECLARE_NODE_VULKAN(noise_fbm)
 DECLARE_NODE(noise_iq)
 DECLARE_NODE(noise_jordan)
 DECLARE_NODE(noise_parberry)

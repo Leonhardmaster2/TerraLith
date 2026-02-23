@@ -105,7 +105,7 @@ if(HESIOD_ENABLE_VULKAN)
   set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
   file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
 
-  set(VULKAN_SHADERS ${SHADER_DIR}/vector_add.comp)
+  set(VULKAN_SHADERS ${SHADER_DIR}/vector_add.comp ${SHADER_DIR}/noise_fbm.comp)
 
   foreach(SHADER ${VULKAN_SHADERS})
     get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
