@@ -11,6 +11,11 @@
 #include "hesiod/model/nodes/base_node.hpp"
 #include "hesiod/model/nodes/post_process.hpp"
 
+#ifdef HESIOD_HAS_VULKAN
+#include "hesiod/gpu/vulkan/vulkan_context.hpp"
+#include "hesiod/gpu/vulkan/vulkan_noise_pipeline.hpp"
+#endif
+
 using namespace attr;
 
 namespace hesiod
@@ -126,5 +131,80 @@ void compute_noise_fbm_node(BaseNode &node)
   post_apply_enveloppe(node, *p_out, p_env);
   post_process_heightmap(node, *p_out);
 }
+
+#ifdef HESIOD_HAS_VULKAN
+bool compute_noise_fbm_node_vulkan(BaseNode &node)
+{
+  // Only engage Vulkan if user toggled GPU on
+  if (!node.get_attr<BoolAttribute>("GPU"))
+    return false;
+
+  // Check Vulkan availability
+  auto &vk_ctx = VulkanContext::instance();
+  if (!vk_ctx.is_ready())
+    return false;
+
+  auto &pipeline = VulkanNoisePipeline::instance();
+  if (!pipeline.is_ready())
+    return false;
+
+  // V1 limitation: fall back to CPU/OpenCL if optional inputs are connected
+  hmap::Heightmap *p_dx = node.get_value_ref<hmap::Heightmap>("dx");
+  hmap::Heightmap *p_dy = node.get_value_ref<hmap::Heightmap>("dy");
+  hmap::Heightmap *p_ctrl = node.get_value_ref<hmap::Heightmap>("control");
+
+  if (p_dx || p_dy || p_ctrl)
+    return false;
+
+  Logger::log()->trace("compute_noise_fbm_node_vulkan: Vulkan path for node [{}]/[{}]",
+                       node.get_label(),
+                       node.get_id());
+
+  hmap::Heightmap *p_env = node.get_value_ref<hmap::Heightmap>("envelope");
+  hmap::Heightmap *p_out = node.get_value_ref<hmap::Heightmap>("output");
+
+  // Extract attributes once
+  auto kw = node.get_attr<WaveNbAttribute>("kw");
+  uint seed = node.get_attr<SeedAttribute>("seed");
+  int  octaves = node.get_attr<IntAttribute>("octaves");
+  float weight = node.get_attr<FloatAttribute>("weight");
+  float persistence = node.get_attr<FloatAttribute>("persistence");
+  float lacunarity = node.get_attr<FloatAttribute>("lacunarity");
+  int   noise_type = node.get_attr<EnumAttribute>("noise_type");
+
+  // Dispatch Vulkan compute per tile
+  for (size_t i = 0; i < p_out->get_ntiles(); ++i)
+  {
+    auto &tile = p_out->tiles[i];
+
+    NoiseFbmPushConstants params{};
+    params.width = static_cast<uint32_t>(tile.shape.x);
+    params.height = static_cast<uint32_t>(tile.shape.y);
+    params.kw_x = kw[0];
+    params.kw_y = kw[1];
+    params.seed = seed;
+    params.octaves = octaves;
+    params.weight = weight;
+    params.persistence = persistence;
+    params.lacunarity = lacunarity;
+    params.noise_type = noise_type;
+    params.bbox_x = tile.bbox.a; // xmin
+    params.bbox_y = tile.bbox.c; // ymin
+    params.bbox_z = tile.bbox.b; // xmax
+    params.bbox_w = tile.bbox.d; // ymax
+
+    pipeline.compute_noise_fbm(tile.vector.data(),
+                               tile.shape.x,
+                               tile.shape.y,
+                               params);
+  }
+
+  // Post-processing (CPU)
+  post_apply_enveloppe(node, *p_out, p_env);
+  post_process_heightmap(node, *p_out);
+
+  return true;
+}
+#endif
 
 } // namespace hesiod

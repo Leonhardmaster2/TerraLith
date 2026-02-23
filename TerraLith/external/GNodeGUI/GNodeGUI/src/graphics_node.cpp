@@ -795,29 +795,56 @@ void GraphicsNode::paint(QPainter                       *painter,
     painter->drawRect(bar_fill);
   }
 
-  // --- Execution time (dim text, bottom-right of node body)
+  // --- Execution time badge (color-coded pill, bottom-right of node body)
 
   if (this->last_execution_time_ms_ > 0.0f)
   {
+    // Format time text
     QString time_text;
     if (this->last_execution_time_ms_ >= 1000.0f)
       time_text = QString::number(this->last_execution_time_ms_ / 1000.0f, 'f', 1) + " s";
     else
       time_text = QString::number(static_cast<int>(this->last_execution_time_ms_)) + " ms";
 
+    // Backend label prefix and color
+    QString badge_text;
+    QColor  badge_color;
+    if (this->last_backend_type_ == 2) // Vulkan
+    {
+      badge_text = "VK " + time_text;
+      badge_color = QColor(0, 255, 170, 200); // #00FFAA cyan-green
+    }
+    else // CPU (or None/OpenCL)
+    {
+      badge_text = "CPU " + time_text;
+      badge_color = QColor(136, 136, 136, 180); // #888888 gray
+    }
+
+    // Measure text
     QFont small_font = painter->font();
-    small_font.setPointSizeF(small_font.pointSizeF() * 0.8);
+    small_font.setPointSizeF(small_font.pointSizeF() * 0.75);
     painter->setFont(small_font);
-    painter->setPen(QColor(128, 131, 141, 180)); // #80838D dim
+    QFontMetrics fm(small_font);
+    float text_w = fm.horizontalAdvance(badge_text);
+    float text_h = fm.height();
 
-    float text_margin = GN_STYLE->node.padding;
-    QRectF time_rect(this->geometry.body_rect.left() + text_margin,
-                     this->geometry.body_rect.bottom() - this->geometry.line_height -
-                         text_margin,
-                     this->geometry.body_rect.width() - 2.f * text_margin,
-                     this->geometry.line_height);
+    // Position: bottom-right of body, inside padding
+    float pad = GN_STYLE->node.padding;
+    float pill_h = text_h + 4.f;
+    float pill_w = text_w + 10.f;
+    float pill_x = this->geometry.body_rect.right() - pill_w - pad;
+    float pill_y = this->geometry.body_rect.bottom() - pill_h - pad;
 
-    painter->drawText(time_rect, Qt::AlignRight | Qt::AlignVCenter, time_text);
+    // Draw pill background
+    painter->setPen(Qt::NoPen);
+    painter->setBrush(badge_color.darker(300));
+    painter->drawRoundedRect(QRectF(pill_x, pill_y, pill_w, pill_h), 4.f, 4.f);
+
+    // Draw badge text
+    painter->setPen(badge_color);
+    painter->drawText(QRectF(pill_x, pill_y, pill_w, pill_h),
+                      Qt::AlignCenter,
+                      badge_text);
   }
 
   // --- Comment
@@ -863,6 +890,17 @@ void GraphicsNode::set_last_execution_time(float time_ms)
 float GraphicsNode::get_last_execution_time() const
 {
   return this->last_execution_time_ms_;
+}
+
+void GraphicsNode::set_last_backend_type(int backend_type)
+{
+  this->last_backend_type_ = backend_type;
+  this->update();
+}
+
+int GraphicsNode::get_last_backend_type() const
+{
+  return this->last_backend_type_;
 }
 
 void GraphicsNode::set_is_node_pinned(bool new_state)

@@ -1,0 +1,179 @@
+/* Copyright (c) 2025 Otto Link. Distributed under the terms of the GNU General
+ * Public License. The full license is in the file LICENSE, distributed with
+ * this software. */
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer OutputBuf { float data[]; } output_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float kw_x;
+  float kw_y;
+  uint  seed;
+  int   octaves;
+  float weight;
+  float persistence;
+  float lacunarity;
+  int   noise_type;
+  float bbox_x;
+  float bbox_y;
+  float bbox_z;
+  float bbox_w;
+} pc;
+
+// --- Hash-based noise (no permutation table needed) ---
+
+// Integer hash: combine two uint values into a pseudo-random uint
+uint hash2(uint x, uint y)
+{
+  x += y * 0x9e3779b9u;
+  x ^= x >> 16;
+  x *= 0x85ebca6bu;
+  x ^= x >> 13;
+  x *= 0xc2b2ae35u;
+  x ^= x >> 16;
+  return x;
+}
+
+uint hash3(uint x, uint y, uint z)
+{
+  return hash2(hash2(x, y), z);
+}
+
+// Generate a gradient vector from a hash (2D)
+vec2 gradient2d(uint hash_val)
+{
+  uint h = hash_val & 7u;
+  float angle = float(h) * 0.7853981633974483; // pi/4
+  return vec2(cos(angle), sin(angle));
+}
+
+// Smoothstep (quintic interpolation for smoother gradients)
+float fade(float t)
+{
+  return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+// --- 2D Perlin Noise ---
+
+float perlin_noise_2d(vec2 p, uint s)
+{
+  vec2 pi = floor(p);
+  vec2 pf = fract(p);
+
+  uint ix = uint(int(pi.x));
+  uint iy = uint(int(pi.y));
+
+  // Gradients at four corners
+  vec2 g00 = gradient2d(hash3(ix,      iy,      s));
+  vec2 g10 = gradient2d(hash3(ix + 1u, iy,      s));
+  vec2 g01 = gradient2d(hash3(ix,      iy + 1u, s));
+  vec2 g11 = gradient2d(hash3(ix + 1u, iy + 1u, s));
+
+  // Distance vectors from corners to point
+  vec2 d00 = pf;
+  vec2 d10 = pf - vec2(1.0, 0.0);
+  vec2 d01 = pf - vec2(0.0, 1.0);
+  vec2 d11 = pf - vec2(1.0, 1.0);
+
+  // Dot products
+  float n00 = dot(g00, d00);
+  float n10 = dot(g10, d10);
+  float n01 = dot(g01, d01);
+  float n11 = dot(g11, d11);
+
+  // Interpolation
+  float u = fade(pf.x);
+  float v = fade(pf.y);
+
+  float nx0 = mix(n00, n10, u);
+  float nx1 = mix(n01, n11, u);
+
+  return mix(nx0, nx1, v);
+}
+
+// --- 2D Value Noise ---
+
+float value_noise_2d(vec2 p, uint s)
+{
+  vec2 pi = floor(p);
+  vec2 pf = fract(p);
+
+  uint ix = uint(int(pi.x));
+  uint iy = uint(int(pi.y));
+
+  // Random values at corners
+  float n00 = float(hash3(ix,      iy,      s)) / 4294967295.0;
+  float n10 = float(hash3(ix + 1u, iy,      s)) / 4294967295.0;
+  float n01 = float(hash3(ix,      iy + 1u, s)) / 4294967295.0;
+  float n11 = float(hash3(ix + 1u, iy + 1u, s)) / 4294967295.0;
+
+  // Remap to [-1, 1]
+  n00 = n00 * 2.0 - 1.0;
+  n10 = n10 * 2.0 - 1.0;
+  n01 = n01 * 2.0 - 1.0;
+  n11 = n11 * 2.0 - 1.0;
+
+  float u = fade(pf.x);
+  float v = fade(pf.y);
+
+  float nx0 = mix(n00, n10, u);
+  float nx1 = mix(n01, n11, u);
+
+  return mix(nx0, nx1, v);
+}
+
+// --- Single noise sample (dispatches by type) ---
+
+float noise_sample(vec2 p, uint s)
+{
+  switch (pc.noise_type)
+  {
+  case 0: // Perlin
+    return perlin_noise_2d(p, s);
+  case 1: // Value
+    return value_noise_2d(p, s);
+  default:
+    return perlin_noise_2d(p, s);
+  }
+}
+
+// --- FBM accumulation ---
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  // Map pixel to world coordinates using tile bbox
+  float u = float(gid.x) / float(pc.width);
+  float v = float(gid.y) / float(pc.height);
+  vec2  p = vec2(pc.bbox_x + u * (pc.bbox_z - pc.bbox_x),
+                 pc.bbox_y + v * (pc.bbox_w - pc.bbox_y));
+
+  // Apply spatial frequency
+  p *= vec2(pc.kw_x, pc.kw_y);
+
+  // FBM
+  float value     = 0.0;
+  float amplitude = 1.0;
+  float frequency = 1.0;
+
+  for (int i = 0; i < pc.octaves; i++)
+  {
+    float n = noise_sample(p * frequency, pc.seed + uint(i));
+    value += amplitude * n;
+
+    // Weight modulation (controls how much the previous octave
+    // influences the amplitude of the next)
+    amplitude *= mix(pc.persistence, pc.persistence * (n * 0.5 + 0.5), pc.weight);
+    frequency *= pc.lacunarity;
+  }
+
+  output_buf.data[gid.y * pc.width + gid.x] = value;
+}

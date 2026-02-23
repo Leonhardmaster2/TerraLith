@@ -1,9 +1,11 @@
 /* Copyright (c) 2025 Otto Link. Distributed under the terms of the GNU General Public
    License. The full license is in the file LICENSE, distributed with this software. */
 #pragma once
+#include <functional>
 #include <memory>
 
 #include <QScrollArea>
+#include <QThread>
 #include <QUndoStack>
 
 #include "gnodegui/graph_viewer.hpp"
@@ -13,7 +15,8 @@
 namespace hesiod
 {
 
-class GraphNode; // forward
+class GraphNode;   // forward
+class GraphWorker; // forward
 
 // =====================================
 // GraphNodeWidget
@@ -44,6 +47,10 @@ public:
   void       set_json_copy_buffer(nlohmann::json const &new_json_copy_buffer);
 
   void add_import_texture_nodes(const std::vector<std::string> &texture_paths);
+
+  // --- Background Compute ---
+  bool is_computing() const;
+  void force_build();
 
 signals:
   // TODO REMOVE GRAPH_ID
@@ -118,12 +125,24 @@ public slots:
 protected:
   void keyPressEvent(QKeyEvent *event) override;
 
+private slots:
+  // --- Background Compute Slots ---
+  void on_worker_node_compute_started(const std::string &node_id);
+  void on_worker_node_compute_finished(const std::string &node_id);
+  void on_worker_progress_updated(const std::string &node_id, float percent);
+  void on_worker_node_execution_time(const std::string &node_id, float time_ms, int backend_type);
+  void on_worker_compute_all_finished(bool was_cancelled);
+
 private:
   QScrollArea *create_attributes_scroll(QWidget *parent, QWidget *attr_widget);
 
   void backup_selected_ids();
   void reselect_backup_ids();
   void delete_selected_with_undo();
+
+  // --- Background Compute ---
+  void start_background_compute(const std::vector<std::string> &sorted_ids);
+  void cancel_background_compute();
 
   // --- Members ---
   std::weak_ptr<GraphNode>       p_graph_node; // own by GraphManager
@@ -137,6 +156,18 @@ private:
 
   // Undo / Redo
   QUndoStack *undo_stack = nullptr;
+
+  // Background compute
+  QThread     *worker_thread_ = nullptr;
+  GraphWorker *graph_worker_  = nullptr;
+  bool         is_computing_  = false;
+
+  // Saved callbacks (suppressed during background compute)
+  std::function<void(const std::string &)>              saved_compute_started_;
+  std::function<void(const std::string &)>              saved_compute_finished_;
+  std::function<void()>                                 saved_update_started_;
+  std::function<void()>                                 saved_update_finished_;
+  std::function<void(const std::string &, float)>       saved_update_progress_;
 };
 
 } // namespace hesiod

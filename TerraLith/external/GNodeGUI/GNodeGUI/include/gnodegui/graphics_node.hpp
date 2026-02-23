@@ -66,6 +66,8 @@ public:
   float get_last_execution_time() const;
   void  set_build_progress(int percent);
   int   get_build_progress() const;
+  void  set_last_backend_type(int backend_type);
+  int   get_last_backend_type() const;
 
   // Fast link tracking for O(K) update_links
   void track_link(GraphicsLink *p_link);
@@ -147,6 +149,7 @@ private:
   // Execution feedback (set by application layer, rendered in paint)
   float                       last_execution_time_ms_ = 0.0f;
   int                         build_progress_percent_ = 0; // 0=idle, 1-99=in progress, 100=done
+  int                         last_backend_type_ = 0; // 0=None, 1=CPU, 2=Vulkan, 3=OpenCL
 };
 
 // --- helper

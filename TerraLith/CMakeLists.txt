@@ -23,6 +23,9 @@ option(HESIOD_MINIMAL_NODE_SET
 option(HESIOD_ENABLE_LTO "Enable LTO and unused-function detection" OFF)
 option(HESIOD_UNUSED_FUNCTIONS "Detect unused static functions" OFF)
 
+# Vulkan compute support
+option(HESIOD_ENABLE_VULKAN "Enable Vulkan compute support" OFF)
+
 # ------------------------------
 # Modules
 # ------------------------------
@@ -39,6 +42,14 @@ include(HesiodGitVersion)
 find_package(spdlog REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
 find_package(nlohmann_json REQUIRED)
+
+# --- Vulkan configuration ---
+if(HESIOD_ENABLE_VULKAN)
+  find_package(Vulkan REQUIRED COMPONENTS glslc)
+  message(STATUS "Vulkan found: ${Vulkan_LIBRARY}")
+  message(STATUS "Vulkan glslc: ${Vulkan_GLSLC_EXECUTABLE}")
+  add_compile_definitions(HESIOD_HAS_VULKAN)
+endif()
 
 # --- OpenCL configuration ---
 if(APPLE)

@@ -97,6 +97,39 @@ target_link_libraries(
           qtexture_downloader)
 
 # ------------------------------
+# Vulkan GPU compute (optional)
+# ------------------------------
+if(HESIOD_ENABLE_VULKAN)
+  # Shader compilation (GLSL -> SPIR-V)
+  set(SHADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/shaders)
+  set(SHADER_OUTPUT_DIR ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+  file(MAKE_DIRECTORY ${SHADER_OUTPUT_DIR})
+
+  set(VULKAN_SHADERS ${SHADER_DIR}/vector_add.comp ${SHADER_DIR}/noise_fbm.comp)
+
+  foreach(SHADER ${VULKAN_SHADERS})
+    get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
+    set(SPIRV_OUTPUT ${SHADER_OUTPUT_DIR}/${SHADER_NAME}.spv)
+    add_custom_command(
+      OUTPUT ${SPIRV_OUTPUT}
+      COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${SHADER} -o ${SPIRV_OUTPUT}
+      DEPENDS ${SHADER}
+      COMMENT "Compiling Vulkan shader: ${SHADER_NAME}.comp")
+    list(APPEND SPIRV_OUTPUTS ${SPIRV_OUTPUT})
+  endforeach()
+
+  add_custom_target(compile_shaders DEPENDS ${SPIRV_OUTPUTS})
+  add_dependencies(${PROJECT_NAME} compile_shaders)
+
+  # Generate shader paths header
+  configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/hesiod/gpu/vulkan/shader_paths.hpp.in
+    ${CMAKE_BINARY_DIR}/include/hesiod/gpu/vulkan/shader_paths.hpp @ONLY)
+
+  target_link_libraries(${PROJECT_NAME} PRIVATE Vulkan::Vulkan)
+endif()
+
+# ------------------------------
 # Copy data folder
 # ------------------------------
 if(APPLE)

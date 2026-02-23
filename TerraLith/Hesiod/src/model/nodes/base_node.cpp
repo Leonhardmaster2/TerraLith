@@ -71,11 +71,37 @@ void BaseNode::compute()
 
   this->update_runtime_info(NodeRuntimeStep::NRS_UPDATE_START);
 
-  if (this->compute_fct)
-    this->compute_fct(*this);
-  else
-    Logger::log()->warn("BaseNode::compute: no compute function set for node {}",
-                        this->get_id());
+  bool handled = false;
+
+#ifdef HESIOD_HAS_VULKAN
+  if (this->compute_vulkan_fct)
+  {
+    try
+    {
+      handled = this->compute_vulkan_fct(*this);
+      if (handled)
+        this->runtime_info.last_backend_used = ComputeBackend::VULKAN;
+    }
+    catch (const std::exception &e)
+    {
+      Logger::log()->warn("BaseNode::compute: Vulkan compute failed for node {}: {}, "
+                          "falling back to CPU",
+                          this->get_id(),
+                          e.what());
+      handled = false;
+    }
+  }
+#endif
+
+  if (!handled)
+  {
+    this->runtime_info.last_backend_used = ComputeBackend::CPU;
+    if (this->compute_fct)
+      this->compute_fct(*this);
+    else
+      Logger::log()->warn("BaseNode::compute: no compute function set for node {}",
+                          this->get_id());
+  }
 
   this->update_runtime_info(NodeRuntimeStep::NRS_UPDATE_END);
 
@@ -556,6 +582,21 @@ void BaseNode::set_comment(const std::string &new_comment)
 void BaseNode::set_compute_fct(std::function<void(BaseNode &node)> new_compute_fct)
 {
   this->compute_fct = std::move(new_compute_fct);
+}
+
+void BaseNode::set_compute_vulkan_fct(std::function<bool(BaseNode &node)> fct)
+{
+  this->compute_vulkan_fct = std::move(fct);
+}
+
+bool BaseNode::supports_vulkan_compute() const
+{
+  return this->compute_vulkan_fct != nullptr;
+}
+
+ComputeBackend BaseNode::get_last_backend_used() const
+{
+  return this->runtime_info.last_backend_used;
 }
 
 void BaseNode::set_id(const std::string &new_id) { gnode::Node::set_id(new_id); }

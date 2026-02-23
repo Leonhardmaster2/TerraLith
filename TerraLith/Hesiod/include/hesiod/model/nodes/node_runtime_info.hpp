@@ -9,6 +9,14 @@
 namespace hesiod
 {
 
+enum class ComputeBackend : int
+{
+  NONE = 0,
+  CPU = 1,
+  VULKAN = 2,
+  OPENCL = 3
+};
+
 enum class NodeRuntimeStep
 {
   NRS_INIT,
@@ -22,6 +30,7 @@ struct NodeRuntimeInfo
   std::chrono::system_clock::time_point time_last_update;
   float                                 update_time;
   size_t                                eval_count = 0;
+  ComputeBackend                        last_backend_used = ComputeBackend::NONE;
 
   virtual void           json_from(nlohmann::json const &json);
   virtual nlohmann::json json_to() const;

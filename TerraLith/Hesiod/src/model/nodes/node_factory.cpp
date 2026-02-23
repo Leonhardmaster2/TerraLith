@@ -25,6 +25,19 @@
     sptr->update_attributes_tool_tip();                                                  \
     break;
 
+// Variant that also sets a Vulkan compute function (GPU-accelerated nodes)
+#ifdef HESIOD_HAS_VULKAN
+#define SETUP_NODE_VULKAN(NodeType, node_type)                                           \
+  case str2int(#NodeType):                                                               \
+    setup_##node_type##_node(*sptr);                                                     \
+    sptr->set_compute_fct(&compute_##node_type##_node);                                  \
+    sptr->set_compute_vulkan_fct(&compute_##node_type##_node_vulkan);                    \
+    sptr->update_attributes_tool_tip();                                                  \
+    break;
+#else
+#define SETUP_NODE_VULKAN(NodeType, node_type) SETUP_NODE(NodeType, node_type)
+#endif
+
 namespace hesiod
 {
 
@@ -592,7 +605,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(MountainStump, mountain_stump);
     SETUP_NODE(MountainTibesti, mountain_tibesti);
     SETUP_NODE(Multisteps, multisteps);
-    SETUP_NODE(NoiseFbm, noise_fbm);
+    SETUP_NODE_VULKAN(NoiseFbm, noise_fbm);
     SETUP_NODE(NoiseIq, noise_iq);
     SETUP_NODE(NoiseJordan, noise_iq);
     SETUP_NODE(NoiseParberry, noise_parberry);
