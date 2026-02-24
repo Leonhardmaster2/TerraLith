@@ -98,7 +98,7 @@ bool compute_fold_node_vulkan(BaseNode &node)
     VkDeviceSize buf_size = static_cast<VkDeviceSize>(pc.width) * pc.height * sizeof(float);
 
     VulkanBuffer data_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
     data_buf.upload(tile.vector.data(), buf_size);
 
     std::vector<VulkanBuffer *> buffers = {&data_buf};

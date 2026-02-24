@@ -35,6 +35,7 @@ public:
   ~HesiodApplication();
 
   void load_project_model_and_ui(const std::string &fname = "", bool keep_name = true);
+  void new_project_and_ui();
   void save_project_model_and_ui(const std::string &fname);
   void save_backup(const std::string &fname);
   void show();

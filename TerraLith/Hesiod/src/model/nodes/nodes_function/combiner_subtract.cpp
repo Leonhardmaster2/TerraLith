@@ -87,7 +87,7 @@ bool compute_combiner_subtract_node_vulkan(BaseNode &node)
     input2_buf.upload(tile_in2.vector.data(), buf_size);
 
     VulkanBuffer output_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 
     std::vector<VulkanBuffer *> buffers = {&input1_buf, &input2_buf, &output_buf};
     gp.dispatch("combiner_subtract", &pc, sizeof(pc), buffers, (pc.width + 15) / 16, (pc.height + 15) / 16);

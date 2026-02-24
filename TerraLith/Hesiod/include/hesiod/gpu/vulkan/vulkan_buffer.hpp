@@ -39,9 +39,10 @@ public:
 private:
   void cleanup();
 
-  VkBuffer       buffer_ = VK_NULL_HANDLE;
-  VkDeviceMemory memory_ = VK_NULL_HANDLE;
-  VkDeviceSize   size_   = 0;
+  VkBuffer              buffer_    = VK_NULL_HANDLE;
+  VkDeviceMemory        memory_    = VK_NULL_HANDLE;
+  VkDeviceSize          size_      = 0;
+  VkMemoryPropertyFlags mem_props_ = 0; // actual memory property flags for coherency handling
 };
 
 VulkanBuffer create_storage_buffer(VkDeviceSize size_bytes);

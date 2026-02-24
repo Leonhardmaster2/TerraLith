@@ -3,6 +3,7 @@
  * this software. */
 #ifdef HESIOD_HAS_VULKAN
 
+#include <chrono>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -207,13 +208,19 @@ void VulkanGenericPipeline::dispatch(const std::string                 &shader_n
   if (!this->ready_)
     throw std::runtime_error("VulkanGenericPipeline not ready");
 
+  using Clock = std::chrono::high_resolution_clock;
+
   uint32_t num_bindings = static_cast<uint32_t>(buffers.size());
+
+  // Phase C.1: Pipeline lookup (cached) + descriptor setup
+  auto t_desc_start = Clock::now();
 
   auto    &entry = this->get_or_create(shader_name, num_bindings, push_size);
   auto    &ctx = VulkanContext::instance();
   VkDevice device = ctx.device();
 
-  // Descriptor pool (per-dispatch, cleaned up after)
+  // WARNING: Descriptor pool is created + destroyed EVERY dispatch call.
+  // This is a significant overhead source — should be pooled/cached.
   VkDescriptorPoolSize pool_size{};
   pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
   pool_size.descriptorCount = num_bindings;
@@ -266,7 +273,14 @@ void VulkanGenericPipeline::dispatch(const std::string                 &shader_n
 
   vkUpdateDescriptorSets(device, num_bindings, writes.data(), 0, nullptr);
 
-  // Record and submit
+  auto t_desc_end = Clock::now();
+
+  // Phase C.2: Record command buffer + submit + fence wait
+  auto t_submit_start = Clock::now();
+
+  // WARNING: submit_and_wait allocates a command buffer, creates a fence,
+  // submits, waits, destroys fence, frees command buffer — EVERY call.
+  // This per-dispatch overhead is the likely #1 bottleneck.
   ctx.submit_and_wait(
       [&](VkCommandBuffer cmd)
       {
@@ -289,8 +303,22 @@ void VulkanGenericPipeline::dispatch(const std::string                 &shader_n
         vkCmdDispatch(cmd, group_x, group_y, group_z);
       });
 
-  // Cleanup per-dispatch resources
+  auto t_submit_end = Clock::now();
+
+  // Phase C.3: Cleanup per-dispatch resources
+  auto t_cleanup_start = Clock::now();
   vkDestroyDescriptorPool(device, desc_pool, nullptr);
+  auto t_cleanup_end = Clock::now();
+
+  double desc_ms = std::chrono::duration<double, std::milli>(t_desc_end - t_desc_start).count();
+  double submit_ms = std::chrono::duration<double, std::milli>(t_submit_end - t_submit_start).count();
+  double cleanup_ms = std::chrono::duration<double, std::milli>(t_cleanup_end - t_cleanup_start).count();
+
+  Logger::log()->trace("  dispatch('{}') breakdown: desc_setup={:.2f}ms  "
+                       "submit_wait={:.2f}ms  cleanup={:.2f}ms  "
+                       "groups=({},{},{})",
+                       shader_name, desc_ms, submit_ms, cleanup_ms,
+                       group_x, group_y, group_z);
 }
 
 } // namespace hesiod

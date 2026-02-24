@@ -35,6 +35,7 @@
 #include "hesiod/logger.hpp"
 #include "hesiod/model/constants/cmap.hpp"
 #include "hesiod/model/constants/color_gradient.hpp"
+#include "hesiod/model/graph/graph_config.hpp"
 #include "hesiod/model/graph/graph_manager.hpp"
 #include "hesiod/model/graph/graph_node.hpp"
 #include "hesiod/model/utils.hpp"
@@ -150,6 +151,46 @@ void HesiodApplication::load_project_model_and_ui(const std::string &fname,
                                                        .default_startup_project_file
                                                  : fname;
 
+  // ── Nuclear cleanup when the window is already visible ─────────────
+  //
+  // Qt's compositing surface becomes permanently corrupted when
+  // QOpenGLWidgets (RenderWidget / ShaderManager) are swapped inside a
+  // visible QMainWindow.  At startup the window has never been shown, so
+  // there is no surface to corrupt.  At runtime we must destroy the old
+  // MainWindow entirely and create a fresh one — exactly replicating the
+  // startup condition.
+  const bool needs_window_recreation = this->main_window &&
+                                       this->main_window->isVisible();
+
+  if (needs_window_recreation)
+  {
+    Logger::log()->trace("load_project_model_and_ui: window is visible, "
+                         "recreating MainWindow");
+
+    // 1. Synchronously tear down old UI widgets
+    this->main_window->clear_dock_widgets();
+
+    if (QWidget *old_central = this->main_window->takeCentralWidget())
+      old_central->setParent(nullptr);
+
+    if (this->project_ui)
+      this->project_ui->cleanup();
+    this->project_ui.reset();
+
+    // Force ALL deferred deletions to complete NOW so old OpenGL widgets
+    // are fully destroyed before anything new is created.
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    QCoreApplication::processEvents();
+
+    if (this->context.project_model)
+      this->context.project_model->cleanup();
+
+    // 2. Save geometry, destroy old window, create a fresh one
+    this->main_window->save_geometry();
+    delete this->main_window;
+    this->main_window = new MainWindow();
+  }
+
   this->cleanup();
 
   // --- model
@@ -242,6 +283,46 @@ void HesiodApplication::load_project_model_and_ui(const std::string &fname,
     this->context.project_model->set_path(fname);
 
   this->notify("Project loaded successfully.");
+
+  // ── Rebuild menu bar and show the fresh window ─────────────────────
+  if (needs_window_recreation)
+  {
+    this->setup_menu_bar();
+    this->on_project_name_changed();
+    this->main_window->show();
+  }
+}
+
+void HesiodApplication::new_project_and_ui()
+{
+  Logger::log()->trace("HesiodApplication::new_project_and_ui");
+  this->notify("Creating new project...");
+
+  // Build a minimal project file with one empty "main" graph
+  fs::path temp_path = fs::temp_directory_path() / "hesiod_new_project.hsd";
+  {
+    ProjectModel temp_model;
+    auto         config = std::make_shared<GraphConfig>();
+    auto         graph = std::make_shared<GraphNode>("main", config);
+    temp_model.get_graph_manager_ref()->add_graph_node(graph, "main");
+
+    nlohmann::json json = temp_model.json_to();
+    json_to_file(json, temp_path.string());
+  }
+
+  // Load through the standard code path — window recreation (if the
+  // window is visible) is handled automatically inside.
+  this->load_project_model_and_ui(temp_path.string(), /* keep_name */ false);
+
+  // Tidy up: remove temp file, clear path/dirty state
+  std::error_code ec;
+  fs::remove(temp_path, ec);
+
+  this->context.project_model->set_path(std::string{});
+  this->context.project_model->set_is_dirty(false);
+  this->on_project_name_changed();
+
+  this->notify("New project created.");
 }
 
 void HesiodApplication::notify(const std::string &msg, int timeout)
@@ -451,7 +532,7 @@ void HesiodApplication::on_new()
 
   if (reply == QMessageBox::Yes)
   {
-    this->load_project_model_and_ui();
+    this->new_project_and_ui();
   }
 }
 

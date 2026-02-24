@@ -83,7 +83,7 @@ bool compute_inverse_node_vulkan(BaseNode &node)
     input_buf.upload(tile_in.vector.data(), buf_size);
 
     VulkanBuffer output_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
 
     std::vector<VulkanBuffer *> buffers = {&input_buf, &output_buf};
     gp.dispatch("inverse", &pc, sizeof(pc), buffers, (pc.width + 15) / 16, (pc.height + 15) / 16);

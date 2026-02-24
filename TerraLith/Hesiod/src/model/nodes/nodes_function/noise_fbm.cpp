@@ -1,6 +1,8 @@
 /* Copyright (c) 2023 Otto Link. Distributed under the terms of the GNU General
  * Public License. The full license is in the file LICENSE, distributed with
  * this software. */
+#include <chrono>
+
 #include "highmap/opencl/gpu_opencl.hpp"
 #include "highmap/primitives.hpp"
 
@@ -174,8 +176,24 @@ bool compute_noise_fbm_node_vulkan(BaseNode &node)
   float lacunarity = node.get_attr<FloatAttribute>("lacunarity");
   int   noise_type = node.get_attr<EnumAttribute>("noise_type");
 
+  // ── Profiling accumulators ─────────────────────────────────────────
+  using Clock = std::chrono::high_resolution_clock;
+  double phase_a_ms = 0.0; // buffer alloc (vkCreateBuffer + vkAllocateMemory)
+  double phase_b_ms = 0.0; // host→device (upload — trivial for noise, but measured)
+  double phase_c_ms = 0.0; // GPU execution (descriptor setup + submit + wait)
+  double phase_d_ms = 0.0; // device→host (download)
+  auto   total_start = Clock::now();
+
+  size_t ntiles = p_out->get_ntiles();
+
+  // NOTE: VulkanBuffer is allocated + freed PER TILE (vkCreateBuffer +
+  // vkAllocateMemory + vkDestroyBuffer + vkFreeMemory).  Descriptor pool
+  // and command buffer + fence are also created/destroyed per-dispatch
+  // inside VulkanGenericPipeline::dispatch().  This is the likely
+  // bottleneck — not the GPU shader itself.
+
   // Dispatch Vulkan compute per tile via the generic pipeline
-  for (size_t i = 0; i < p_out->get_ntiles(); ++i)
+  for (size_t i = 0; i < ntiles; ++i)
   {
     auto &tile = p_out->tiles[i];
 
@@ -197,14 +215,24 @@ bool compute_noise_fbm_node_vulkan(BaseNode &node)
 
     VkDeviceSize buf_size =
         static_cast<VkDeviceSize>(tile.shape.x) * tile.shape.y * sizeof(float);
+
+    // Phase A: Buffer allocation
+    auto t0 = Clock::now();
     VulkanBuffer output_buf(buf_size,
                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+                                VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    auto t1 = Clock::now();
+    phase_a_ms += std::chrono::duration<double, std::milli>(t1 - t0).count();
 
+    // Phase B: Host→Device upload (noise_fbm has no input buffers, skip)
+    // (measured as zero for this node — combiner nodes would show upload time)
+
+    // Phase C: GPU dispatch (descriptor pool + set alloc + cmd buffer + submit + wait)
     uint32_t group_x = (params.width + 15) / 16;
     uint32_t group_y = (params.height + 15) / 16;
 
+    auto t2 = Clock::now();
     std::vector<VulkanBuffer *> buffers = {&output_buf};
     gp.dispatch("noise_fbm",
                 &params,
@@ -212,9 +240,40 @@ bool compute_noise_fbm_node_vulkan(BaseNode &node)
                 buffers,
                 group_x,
                 group_y);
+    auto t3 = Clock::now();
+    phase_c_ms += std::chrono::duration<double, std::milli>(t3 - t2).count();
 
+    // Phase D: Device→Host download
+    auto t4 = Clock::now();
     output_buf.download(tile.vector.data(), buf_size);
+    auto t5 = Clock::now();
+    phase_d_ms += std::chrono::duration<double, std::milli>(t5 - t4).count();
+
+    // (VulkanBuffer destructor runs here — vkDestroyBuffer + vkFreeMemory)
   }
+
+  auto total_end = Clock::now();
+  double total_ms = std::chrono::duration<double, std::milli>(total_end - total_start).count();
+
+  Logger::log()->info("═══ VULKAN PROFILING: NoiseFbm [{}] ═══", node.get_id());
+  Logger::log()->info("  Tiles: {}, Resolution per tile: {}x{}",
+                      ntiles,
+                      ntiles > 0 ? p_out->tiles[0].shape.x : 0,
+                      ntiles > 0 ? p_out->tiles[0].shape.y : 0);
+  Logger::log()->info("  Phase A (buffer alloc):    {:7.2f} ms  [{:5.1f}%]",
+                      phase_a_ms, 100.0 * phase_a_ms / total_ms);
+  Logger::log()->info("  Phase B (host→device):     {:7.2f} ms  [{:5.1f}%]  (no input bufs)",
+                      phase_b_ms, 100.0 * phase_b_ms / total_ms);
+  Logger::log()->info("  Phase C (GPU dispatch):    {:7.2f} ms  [{:5.1f}%]  "
+                      "(includes desc pool + cmd buf + fence per tile!)",
+                      phase_c_ms, 100.0 * phase_c_ms / total_ms);
+  Logger::log()->info("  Phase D (device→host):     {:7.2f} ms  [{:5.1f}%]",
+                      phase_d_ms, 100.0 * phase_d_ms / total_ms);
+  Logger::log()->info("  Unaccounted (buf dealloc): {:7.2f} ms  [{:5.1f}%]",
+                      total_ms - (phase_a_ms + phase_b_ms + phase_c_ms + phase_d_ms),
+                      100.0 * (total_ms - (phase_a_ms + phase_b_ms + phase_c_ms + phase_d_ms)) / total_ms);
+  Logger::log()->info("  TOTAL:                     {:7.2f} ms", total_ms);
+  Logger::log()->info("═══════════════════════════════════════════");
 
   // Post-processing (CPU)
   post_apply_enveloppe(node, *p_out, p_env);
