@@ -23,11 +23,13 @@ public:
 
   bool is_ready() const;
 
-  // Dispatch a compute shader.
+  // Dispatch a compute shader with dynamic multi-input SSBO bindings.
   //   shader_name  : base name of .spv file (e.g. "abs" loads abs.spv)
   //   push_data    : pointer to push constant struct (may be nullptr if push_size==0)
   //   push_size    : size in bytes of push constants (0 if none)
-  //   buffers      : ordered SSBO pointers (binding 0, 1, 2, ...)
+  //   buffers      : ordered SSBO pointers — buffer[i] binds to set=0, binding=i.
+  //                  Supports any number of inputs/outputs (e.g., 2 inputs + 1 output
+  //                  for combiner nodes, 1 input + 1 output for unary nodes).
   //   group_x/y/z  : workgroup dispatch counts
   void dispatch(const std::string              &shader_name,
                 const void                     *push_data,
