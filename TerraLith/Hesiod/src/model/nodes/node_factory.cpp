@@ -561,10 +561,10 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(GradientTalus, gradient_talus);
     SETUP_NODE(HeightmapToKernel, heightmap_to_kernel);
     SETUP_NODE(HeightmapToMask, heightmap_to_mask);
-    SETUP_NODE(HeightmapToNormalMap, heightmap_to_normal_map);
+    SETUP_NODE_VULKAN(HeightmapToNormalMap, heightmap_to_normal_map);
     SETUP_NODE(HeightmapToRGBA, heightmap_to_rgba);
     SETUP_NODE(HemisphereFieldFbm, hemisphere_field_fbm);
-    SETUP_NODE(HydraulicBlur, hydraulic_blur);
+    SETUP_NODE_VULKAN(HydraulicBlur, hydraulic_blur);
     SETUP_NODE(HydraulicMusgrave, hydraulic_musgrave);
     SETUP_NODE(HydraulicParticle, hydraulic_particle);
     SETUP_NODE(HydraulicProcedural, hydraulic_procedural);
@@ -676,7 +676,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(SelectMidrange, select_midrange);
     SETUP_NODE(SelectPulse, select_pulse);
     SETUP_NODE(SelectRivers, select_rivers);
-    SETUP_NODE(SelectSlope, select_slope);
+    SETUP_NODE_VULKAN(SelectSlope, select_slope);
     SETUP_NODE(SelectSoilFlow, select_soil_flow);
     SETUP_NODE(SelectSoilRocks, select_soil_rocks);
     SETUP_NODE(SelectSoilWeathered, select_soil_weathered);
