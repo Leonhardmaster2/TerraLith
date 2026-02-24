@@ -90,10 +90,10 @@ bool compute_hydraulic_blur_node_vulkan(BaseNode &node)
   float vmax        = node.get_attr<FloatAttribute>("vmax");
   float k_smoothing = node.get_attr<FloatAttribute>("k_smoothing");
 
-  // Cap GPU path at ir <= 16 to keep the 2D kernel practical;
+  // Cap GPU path at ir <= 64 to keep the 2D kernel practical;
   // larger radii fall back to CPU.
   int ir_check = std::max(1, (int)(radius * p_out->shape.x));
-  if (ir_check > 16) return false;
+  if (ir_check > 64) return false;
 
   // Copy input to output first (matching CPU path)
   *p_out = *p_in;
