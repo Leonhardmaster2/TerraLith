@@ -4,12 +4,16 @@
 #pragma once
 #ifdef HESIOD_HAS_VULKAN
 
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 
 #include <vulkan/vulkan.h>
 
 namespace hesiod
 {
+
+class VulkanBuffer;
 
 struct NoiseFbmPushConstants
 {
@@ -53,12 +57,21 @@ private:
   VulkanNoisePipeline();
 
   void init();
+  void ensure_capacity(VkDeviceSize required_size);
 
+  // Pipeline objects
   VkDescriptorSetLayout desc_layout_    = VK_NULL_HANDLE;
   VkPipelineLayout      pipeline_layout_ = VK_NULL_HANDLE;
   VkShaderModule        shader_module_   = VK_NULL_HANDLE;
   VkPipeline            pipeline_        = VK_NULL_HANDLE;
   bool                  ready_           = false;
+
+  // Persistent cache
+  std::unique_ptr<VulkanBuffer> persistent_staging_buffer_;
+  std::unique_ptr<VulkanBuffer> persistent_storage_buffer_;
+  VkDescriptorPool              descriptor_pool_ = VK_NULL_HANDLE;
+  VkDescriptorSet               descriptor_set_  = VK_NULL_HANDLE;
+  size_t                        current_buffer_capacity_ = 0;
 };
 
 } // namespace hesiod
