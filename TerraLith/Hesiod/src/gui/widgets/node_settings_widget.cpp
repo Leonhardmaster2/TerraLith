@@ -369,6 +369,35 @@ void NodeSettingsWidget::update_content()
       this->attr_layout->addWidget(header);
     }
 
+    // GPU toggle checkbox for Vulkan-capable nodes
+    if (p_node->supports_vulkan_compute())
+    {
+      auto *gpu_checkbox = new QCheckBox("Enable GPU Compute");
+      gpu_checkbox->setChecked(p_node->is_vulkan_enabled());
+      gpu_checkbox->setToolTip(
+          "When enabled, this node uses Vulkan GPU acceleration.\n"
+          "Disable to force CPU computation.");
+      gpu_checkbox->setStyleSheet(
+          "QCheckBox { color: #00FFAA; spacing: 6px; padding: 4px 8px; }"
+          "QCheckBox::indicator { width: 16px; height: 16px; border: 1px solid #333338; "
+          "border-radius: 3px; background: #151518; }"
+          "QCheckBox::indicator:checked { background: #00FFAA; border: 1px solid #00FFAA; }");
+
+      this->connect(gpu_checkbox,
+                    &QCheckBox::toggled,
+                    this,
+                    [this, p_node, node_id](bool checked)
+                    {
+                      p_node->set_vulkan_enabled(checked);
+
+                      // trigger graph recompute
+                      if (this->p_graph_node_widget)
+                        this->p_graph_node_widget->on_node_reload_request(node_id);
+                    });
+
+      this->attr_layout->addWidget(gpu_checkbox);
+    }
+
     auto *attr_widget = new NodeAttributesWidget(p_gno->get_shared(),
                                                  node_id,
                                                  this->p_graph_node_widget,

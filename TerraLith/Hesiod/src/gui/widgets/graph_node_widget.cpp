@@ -1476,6 +1476,7 @@ void GraphNodeWidget::on_worker_node_execution_time(const std::string &node_id,
   {
     p_gfx->set_last_execution_time(time_ms);
     p_gfx->set_last_backend_type(backend_type);
+    p_gfx->update(); // force immediate visual repaint of backend badge
   }
 }
 

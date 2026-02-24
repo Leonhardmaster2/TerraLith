@@ -74,7 +74,7 @@ void BaseNode::compute()
   bool handled = false;
 
 #ifdef HESIOD_HAS_VULKAN
-  if (this->compute_vulkan_fct)
+  if (this->compute_vulkan_fct && this->vulkan_enabled_)
   {
     try
     {
@@ -412,6 +412,9 @@ void BaseNode::json_from(nlohmann::json const &json)
     if (json.contains("runtime_info"))
       this->runtime_info.json_from(json["runtime_info"]);
 
+    if (json.contains("vulkan_enabled"))
+      this->vulkan_enabled_ = json["vulkan_enabled"].get<bool>();
+
     for (auto &[key, attr] : this->attr)
     {
       if (json.contains(key))
@@ -440,6 +443,7 @@ nlohmann::json BaseNode::json_to() const
     json["label"] = this->get_label();
     json["comment"] = this->get_comment();
     json["runtime_info"] = this->runtime_info.json_to();
+    json["vulkan_enabled"] = this->vulkan_enabled_;
   }
   catch (const std::exception &e)
   {
@@ -597,6 +601,16 @@ bool BaseNode::supports_vulkan_compute() const
 ComputeBackend BaseNode::get_last_backend_used() const
 {
   return this->runtime_info.last_backend_used;
+}
+
+void BaseNode::set_vulkan_enabled(bool enabled)
+{
+  this->vulkan_enabled_ = enabled;
+}
+
+bool BaseNode::is_vulkan_enabled() const
+{
+  return this->vulkan_enabled_;
 }
 
 void BaseNode::set_id(const std::string &new_id) { gnode::Node::set_id(new_id); }

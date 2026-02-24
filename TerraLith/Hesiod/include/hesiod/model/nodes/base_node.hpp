@@ -60,6 +60,10 @@ public:
   bool supports_vulkan_compute() const;
   ComputeBackend get_last_backend_used() const;
 
+  // --- GPU toggle ---
+  void set_vulkan_enabled(bool enabled);
+  bool is_vulkan_enabled() const;
+
   // --- Serialization ---
   virtual void           json_from(nlohmann::json const &json);
   virtual nlohmann::json json_to() const;
@@ -123,6 +127,7 @@ private:
   NodeRuntimeInfo                     runtime_info;
   std::function<void(BaseNode &node)> compute_fct = nullptr;
   std::function<bool(BaseNode &node)> compute_vulkan_fct = nullptr;
+  bool                                vulkan_enabled_ = true;
 };
 
 // =====================================
