@@ -12,7 +12,9 @@
 #include "hesiod/model/nodes/post_process.hpp"
 
 #ifdef HESIOD_HAS_VULKAN
+#include "hesiod/gpu/vulkan/vulkan_buffer.hpp"
 #include "hesiod/gpu/vulkan/vulkan_context.hpp"
+#include "hesiod/gpu/vulkan/vulkan_generic_pipeline.hpp"
 #include "hesiod/gpu/vulkan/vulkan_noise_pipeline.hpp"
 #endif
 
@@ -144,8 +146,8 @@ bool compute_noise_fbm_node_vulkan(BaseNode &node)
   if (!vk_ctx.is_ready())
     return false;
 
-  auto &pipeline = VulkanNoisePipeline::instance();
-  if (!pipeline.is_ready())
+  auto &gp = VulkanGenericPipeline::instance();
+  if (!gp.is_ready())
     return false;
 
   // V1 limitation: fall back to CPU/OpenCL if optional inputs are connected
@@ -164,15 +166,15 @@ bool compute_noise_fbm_node_vulkan(BaseNode &node)
   hmap::Heightmap *p_out = node.get_value_ref<hmap::Heightmap>("output");
 
   // Extract attributes once
-  auto kw = node.get_attr<WaveNbAttribute>("kw");
-  uint seed = node.get_attr<SeedAttribute>("seed");
-  int  octaves = node.get_attr<IntAttribute>("octaves");
+  auto  kw = node.get_attr<WaveNbAttribute>("kw");
+  uint  seed = node.get_attr<SeedAttribute>("seed");
+  int   octaves = node.get_attr<IntAttribute>("octaves");
   float weight = node.get_attr<FloatAttribute>("weight");
   float persistence = node.get_attr<FloatAttribute>("persistence");
   float lacunarity = node.get_attr<FloatAttribute>("lacunarity");
   int   noise_type = node.get_attr<EnumAttribute>("noise_type");
 
-  // Dispatch Vulkan compute per tile
+  // Dispatch Vulkan compute per tile via the generic pipeline
   for (size_t i = 0; i < p_out->get_ntiles(); ++i)
   {
     auto &tile = p_out->tiles[i];
@@ -193,10 +195,25 @@ bool compute_noise_fbm_node_vulkan(BaseNode &node)
     params.bbox_z = tile.bbox.b; // xmax
     params.bbox_w = tile.bbox.d; // ymax
 
-    pipeline.compute_noise_fbm(tile.vector.data(),
-                               tile.shape.x,
-                               tile.shape.y,
-                               params);
+    VkDeviceSize buf_size =
+        static_cast<VkDeviceSize>(tile.shape.x) * tile.shape.y * sizeof(float);
+    VulkanBuffer output_buf(buf_size,
+                            VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    uint32_t group_x = (params.width + 15) / 16;
+    uint32_t group_y = (params.height + 15) / 16;
+
+    std::vector<VulkanBuffer *> buffers = {&output_buf};
+    gp.dispatch("noise_fbm",
+                &params,
+                sizeof(NoiseFbmPushConstants),
+                buffers,
+                group_x,
+                group_y);
+
+    output_buf.download(tile.vector.data(), buf_size);
   }
 
   // Post-processing (CPU)
