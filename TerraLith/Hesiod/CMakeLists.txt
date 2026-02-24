@@ -120,7 +120,14 @@ if(HESIOD_ENABLE_VULKAN)
     ${SHADER_DIR}/gain.comp
     ${SHADER_DIR}/saturate.comp
     ${SHADER_DIR}/gaussian_decay.comp
-    ${SHADER_DIR}/cos.comp)
+    ${SHADER_DIR}/cos.comp
+    ${SHADER_DIR}/combiner_add.comp
+    ${SHADER_DIR}/combiner_subtract.comp
+    ${SHADER_DIR}/combiner_multiply.comp
+    ${SHADER_DIR}/combiner_divide.comp
+    ${SHADER_DIR}/combiner_min.comp
+    ${SHADER_DIR}/combiner_max.comp
+    ${SHADER_DIR}/combiner_blend.comp)
 
   foreach(SHADER ${VULKAN_SHADERS})
     get_filename_component(SHADER_NAME ${SHADER} NAME_WE)

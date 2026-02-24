@@ -160,6 +160,12 @@ std::map<std::string, std::string> get_node_inventory()
       {"Blend", "Operator/Blend"},
       {"Blend3", "Operator/Blend"},
       {"BlendPoissonBf", "Operator/Blend"},
+      {"CombinerAdd", "Operator/Combiner"},
+      {"CombinerSubtract", "Operator/Combiner"},
+      {"CombinerMultiply", "Operator/Combiner"},
+      {"CombinerDivide", "Operator/Combiner"},
+      {"CombinerMin", "Operator/Combiner"},
+      {"CombinerMax", "Operator/Combiner"},
       {"Border", "Operator/Morphology"},
       {"Brush", "Primitive/Authoring"},
       {"Broadcast", "Routing"},
@@ -481,9 +487,15 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(AccumulationCurvature, accumulation_curvature);
     SETUP_NODE(Badlands, badlands);
     SETUP_NODE(BasaltField, basalt_field);
-    SETUP_NODE(Blend, blend);
+    SETUP_NODE_VULKAN(Blend, blend);
     SETUP_NODE(Blend3, blend3);
     SETUP_NODE(BlendPoissonBf, blend_poisson_bf);
+    SETUP_NODE_VULKAN(CombinerAdd, combiner_add);
+    SETUP_NODE_VULKAN(CombinerSubtract, combiner_subtract);
+    SETUP_NODE_VULKAN(CombinerMultiply, combiner_multiply);
+    SETUP_NODE_VULKAN(CombinerDivide, combiner_divide);
+    SETUP_NODE_VULKAN(CombinerMin, combiner_min);
+    SETUP_NODE_VULKAN(CombinerMax, combiner_max);
     SETUP_NODE(Border, border);
     SETUP_NODE(Brush, brush);
     SETUP_NODE(Bulkify, bulkify);

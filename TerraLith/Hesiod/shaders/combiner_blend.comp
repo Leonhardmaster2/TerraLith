@@ -1,0 +1,49 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer Input1Buf { float data[]; } input1_buf;
+layout(set = 0, binding = 1) buffer Input2Buf { float data[]; } input2_buf;
+layout(set = 0, binding = 2) buffer OutputBuf { float data[]; } output_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  int   method;
+  float k;
+  float weight1;
+  float weight2;
+} pc;
+
+// Blending methods (matching C++ enum BlendingMethod)
+// 0=ADD, 3=MAXIMUM, 5=MINIMUM, 7=MULTIPLY, 11=REPLACE, 13=SUBSTRACT
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  uint idx = gid.y * pc.width + gid.x;
+  float a = input1_buf.data[idx] * pc.weight1;
+  float b = input2_buf.data[idx] * pc.weight2;
+
+  float result;
+  switch (pc.method)
+  {
+    case 0:  result = a + b; break;                           // ADD
+    case 3:  result = max(a, b); break;                       // MAXIMUM
+    case 4:  result = max(a, b) - pc.k * exp(-(a-b)*(a-b) / pc.k); break; // MAXIMUM_SMOOTH
+    case 5:  result = min(a, b); break;                       // MINIMUM
+    case 6:  result = min(a, b) + pc.k * exp(-(a-b)*(a-b) / pc.k); break; // MINIMUM_SMOOTH
+    case 7:  result = a * b; break;                           // MULTIPLY
+    case 8:  result = a * b + a; break;                       // MULTIPLY_ADD
+    case 9:  result = 1.0 - abs(1.0 - a - b); break;         // NEGATE
+    case 11: result = b; break;                               // REPLACE
+    case 13: result = a - b; break;                           // SUBSTRACT
+    default: result = a + b; break;                           // fallback
+  }
+
+  output_buf.data[idx] = result;
+}
