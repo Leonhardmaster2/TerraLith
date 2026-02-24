@@ -10,6 +10,11 @@
 #include "hesiod/model/nodes/base_node.hpp"
 #include "hesiod/model/nodes/post_process.hpp"
 
+#ifdef HESIOD_HAS_VULKAN
+#include "hesiod/gpu/vulkan/vulkan_buffer.hpp"
+#include "hesiod/gpu/vulkan/vulkan_generic_pipeline.hpp"
+#endif
+
 using namespace attr;
 
 namespace hesiod
@@ -64,5 +69,52 @@ void compute_smoothstep_node(BaseNode &node)
         node.get_config_ref()->hmap_transform_mode_cpu);
   }
 }
+
+#ifdef HESIOD_HAS_VULKAN
+bool compute_smoothstep_node_vulkan(BaseNode &node)
+{
+  hmap::Heightmap *p_in = node.get_value_ref<hmap::Heightmap>("input");
+  if (!p_in) return false;
+
+  auto &gp = VulkanGenericPipeline::instance();
+  if (!gp.is_ready()) return false;
+
+  hmap::Heightmap *p_out = node.get_value_ref<hmap::Heightmap>("output");
+  *p_out = *p_in;
+
+  float hmin = p_in->min();
+  float hmax = p_in->max();
+
+  // Map order string to int
+  std::string order_str = node.get_attr<ChoiceAttribute>("order");
+  int32_t     order     = (order_str == "5th") ? 5 : (order_str == "7th") ? 7 : 3;
+
+  struct { uint32_t width; uint32_t height; int32_t order; float hmin; float hmax; } pc{};
+
+  for (size_t i = 0; i < p_out->get_ntiles(); ++i)
+  {
+    auto &tile = p_out->tiles[i];
+
+    pc.width  = static_cast<uint32_t>(tile.shape.x);
+    pc.height = static_cast<uint32_t>(tile.shape.y);
+    pc.order  = order;
+    pc.hmin   = hmin;
+    pc.hmax   = hmax;
+
+    VkDeviceSize buf_size = static_cast<VkDeviceSize>(pc.width) * pc.height * sizeof(float);
+
+    VulkanBuffer data_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    data_buf.upload(tile.vector.data(), buf_size);
+
+    std::vector<VulkanBuffer *> buffers = {&data_buf};
+    gp.dispatch("smoothstep", &pc, sizeof(pc), buffers, (pc.width + 15) / 16, (pc.height + 15) / 16);
+
+    data_buf.download(tile.vector.data(), buf_size);
+  }
+
+  return true;
+}
+#endif
 
 } // namespace hesiod

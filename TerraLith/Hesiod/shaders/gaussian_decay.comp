@@ -1,0 +1,27 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer InputBuf  { float data[]; } input_buf;
+layout(set = 0, binding = 1) buffer OutputBuf { float data[]; } output_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float sigma;
+} pc;
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  uint  idx = gid.y * pc.width + gid.x;
+  float v = input_buf.data[idx];
+
+  // Gaussian decay: exp(-v^2 / (2 * sigma^2))
+  float inv_2sigma2 = 1.0 / (2.0 * pc.sigma * pc.sigma);
+  output_buf.data[idx] = exp(-v * v * inv_2sigma2);
+}

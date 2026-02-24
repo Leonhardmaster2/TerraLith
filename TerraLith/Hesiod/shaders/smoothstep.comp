@@ -1,0 +1,55 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer DataBuf { float data[]; } data_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  int   order;  // 3, 5, or 7
+  float hmin;
+  float hmax;
+} pc;
+
+float smoothstep3(float t)
+{
+  return t * t * (3.0 - 2.0 * t);
+}
+
+float smoothstep5(float t)
+{
+  return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+}
+
+float smoothstep7(float t)
+{
+  return t * t * t * t * (t * (t * (t * -20.0 + 70.0) - 84.0) + 35.0);
+}
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  uint  idx = gid.y * pc.width + gid.x;
+  float v = data_buf.data[idx];
+
+  // Normalize to [0, 1]
+  float range = pc.hmax - pc.hmin;
+  float t = (range != 0.0) ? (v - pc.hmin) / range : 0.0;
+  t = clamp(t, 0.0, 1.0);
+
+  switch (pc.order)
+  {
+  case 3:  t = smoothstep3(t); break;
+  case 5:  t = smoothstep5(t); break;
+  case 7:  t = smoothstep7(t); break;
+  default: t = smoothstep3(t); break;
+  }
+
+  // Remap back to original range
+  data_buf.data[idx] = pc.hmin + t * range;
+}

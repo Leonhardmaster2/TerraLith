@@ -468,7 +468,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(ExportHeightmap, export_heightmap);
     SETUP_NODE(FloodingUniformLevel, flooding_uniform_level);
     SETUP_NODE(GaborWaveFbm, gabor_wave_fbm);
-    SETUP_NODE(Gain, gain);
+    SETUP_NODE_VULKAN(Gain, gain);
     SETUP_NODE(HydraulicStreamLog, hydraulic_stream_log);
     SETUP_NODE(Noise, noise);
     SETUP_NODE(Preview, preview);
@@ -476,7 +476,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(Thru, thru);
 
 #ifndef HESIOD_MINIMAL_NODE_SET
-    SETUP_NODE(Abs, abs);
+    SETUP_NODE_VULKAN(Abs, abs);
     SETUP_NODE(AbsSmooth, abs_smooth);
     SETUP_NODE(AccumulationCurvature, accumulation_curvature);
     SETUP_NODE(Badlands, badlands);
@@ -490,7 +490,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(Bump, bump);
     SETUP_NODE(BumpLorentzian, bump_lorentzian);
     SETUP_NODE(Caldera, caldera);
-    SETUP_NODE(Clamp, clamp);
+    SETUP_NODE_VULKAN(Clamp, clamp);
     SETUP_NODE(ClampOblique, clamp_oblique);
     SETUP_NODE(Closing, closing);
     SETUP_NODE(Cloud, cloud);
@@ -521,7 +521,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(ConeComplex, cone_complex);
     SETUP_NODE(ConeSigmoid, cone_sigmoid);
     SETUP_NODE(Constant, constant);
-    SETUP_NODE(Cos, cos);
+    SETUP_NODE_VULKAN(Cos, cos);
     SETUP_NODE(ConvolveSVD, convolve_svd);
     SETUP_NODE(Crater, crater);
     SETUP_NODE(CurvatureMean, curvature_mean);
@@ -549,10 +549,10 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(FloodingFromPoint, flooding_from_point);
     SETUP_NODE(FloodingLakeSystem, flooding_lake_system);
     SETUP_NODE(FlowStream, flow_stream);
-    SETUP_NODE(Fold, fold);
-    SETUP_NODE(GammaCorrection, gamma_correction);
+    SETUP_NODE_VULKAN(Fold, fold);
+    SETUP_NODE_VULKAN(GammaCorrection, gamma_correction);
     SETUP_NODE(GammaCorrectionLocal, gamma_correction_local);
-    SETUP_NODE(GaussianDecay, gaussian_decay);
+    SETUP_NODE_VULKAN(GaussianDecay, gaussian_decay);
     SETUP_NODE(GaussianPulse, gaussian_pulse);
     SETUP_NODE(Gavoronoise, gavoronoise);
     SETUP_NODE(Gradient, gradient);
@@ -575,7 +575,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(HydraulicVpipes, hydraulic_vpipes);
     SETUP_NODE(ImportHeightmap, import_heightmap);
     SETUP_NODE(ImportTexture, import_texture);
-    SETUP_NODE(Inverse, inverse);
+    SETUP_NODE_VULKAN(Inverse, inverse);
     SETUP_NODE(Island, island);
     SETUP_NODE(IslandLandMask, island_land_mask);
     SETUP_NODE(KernelDiskSmooth, kernel_disk_smooth);
@@ -651,8 +651,8 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(RecurveS, recurve_s);
     SETUP_NODE(RelativeDistanceFromSkeleton, relative_distance_from_skeleton);
     SETUP_NODE(RelativeElevation, relative_elevation);
-    SETUP_NODE(Remap, remap);
-    SETUP_NODE(Rescale, rescale);
+    SETUP_NODE_VULKAN(Remap, remap);
+    SETUP_NODE_VULKAN(Rescale, rescale);
     SETUP_NODE(Reverse, reverse);
     SETUP_NODE(ReverseAboveThreshold, reverse_above_theshold);
     SETUP_NODE(ReverseMidpoint, reverse_midpoint);
@@ -663,7 +663,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(RotateDisplacement, rotate_displacement);
     SETUP_NODE(Ruggedness, ruggedness);
     SETUP_NODE(Rugosity, rugosity);
-    SETUP_NODE(Saturate, saturate);
+    SETUP_NODE_VULKAN(Saturate, saturate);
     SETUP_NODE(ScanMask, scan_mask);
     SETUP_NODE(SedimentDeposition, sediment_deposition);
     SETUP_NODE(SelectAngle, select_angle);
@@ -687,14 +687,14 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(ShapeIndex, shape_index);
     SETUP_NODE(SharpenCone, sharpen_cone);
     SETUP_NODE(ShatteredPeak, shattered_peak);
-    SETUP_NODE(ShiftElevation, shift_elevation);
+    SETUP_NODE_VULKAN(ShiftElevation, shift_elevation);
     SETUP_NODE(Skeleton, skeleton);
     SETUP_NODE(Slope, slope);
     SETUP_NODE(SmoothCpulse, smooth_cpulse);
     SETUP_NODE(SmoothFill, smooth_fill);
     SETUP_NODE(SmoothFillHoles, smooth_fill_holes);
     SETUP_NODE(SmoothFillSmearPeaks, smooth_fill_smear_peaks);
-    SETUP_NODE(Smoothstep, smoothstep);
+    SETUP_NODE_VULKAN(Smoothstep, smoothstep);
     SETUP_NODE(Stamping, stamping);
     SETUP_NODE(StdLocal, std_local);
     SETUP_NODE(SteepenConvective, steepen_convective);

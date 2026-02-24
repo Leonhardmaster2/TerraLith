@@ -1,0 +1,30 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer InputBuf  { float data[]; } input_buf;
+layout(set = 0, binding = 1) buffer OutputBuf { float data[]; } output_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float from_min;
+  float from_max;
+  float to_min;
+  float to_max;
+} pc;
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  uint  idx = gid.y * pc.width + gid.x;
+  float v = input_buf.data[idx];
+
+  float range_from = pc.from_max - pc.from_min;
+  float t = (range_from != 0.0) ? (v - pc.from_min) / range_from : 0.0;
+  output_buf.data[idx] = pc.to_min + t * (pc.to_max - pc.to_min);
+}

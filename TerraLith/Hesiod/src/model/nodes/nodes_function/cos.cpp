@@ -10,6 +10,11 @@
 #include "hesiod/model/nodes/base_node.hpp"
 #include "hesiod/model/nodes/post_process.hpp"
 
+#ifdef HESIOD_HAS_VULKAN
+#include "hesiod/gpu/vulkan/vulkan_buffer.hpp"
+#include "hesiod/gpu/vulkan/vulkan_generic_pipeline.hpp"
+#endif
+
 using namespace attr;
 
 namespace hesiod
@@ -69,5 +74,57 @@ void compute_cos_node(BaseNode &node)
                            node.get_attr<RangeAttribute>("remap"));
   }
 }
+
+#ifdef HESIOD_HAS_VULKAN
+bool compute_cos_node_vulkan(BaseNode &node)
+{
+  hmap::Heightmap *p_in = node.get_value_ref<hmap::Heightmap>("input");
+  if (!p_in) return false;
+
+  auto &gp = VulkanGenericPipeline::instance();
+  if (!gp.is_ready()) return false;
+
+  hmap::Heightmap *p_out = node.get_value_ref<hmap::Heightmap>("output");
+
+  float frequency   = node.get_attr<FloatAttribute>("frequency");
+  float phase_shift = node.get_attr<FloatAttribute>("phase_shift");
+
+  struct { uint32_t width; uint32_t height; float frequency; float phase_shift; } pc{};
+
+  for (size_t i = 0; i < p_out->get_ntiles(); ++i)
+  {
+    auto &tile_in  = p_in->tiles[i];
+    auto &tile_out = p_out->tiles[i];
+
+    pc.width       = static_cast<uint32_t>(tile_in.shape.x);
+    pc.height      = static_cast<uint32_t>(tile_in.shape.y);
+    pc.frequency   = frequency;
+    pc.phase_shift = phase_shift;
+
+    VkDeviceSize buf_size = static_cast<VkDeviceSize>(pc.width) * pc.height * sizeof(float);
+
+    VulkanBuffer input_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    input_buf.upload(tile_in.vector.data(), buf_size);
+
+    VulkanBuffer output_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    std::vector<VulkanBuffer *> buffers = {&input_buf, &output_buf};
+    gp.dispatch("cos", &pc, sizeof(pc), buffers, (pc.width + 15) / 16, (pc.height + 15) / 16);
+
+    output_buf.download(tile_out.vector.data(), buf_size);
+  }
+
+  // post-process (CPU)
+  post_process_heightmap(node,
+                         *p_out,
+                         node.get_attr<BoolAttribute>("inverse"),
+                         false, 0, false, {0.f, 0.f}, 0.f,
+                         node.get_attr_ref<RangeAttribute>("remap")->get_is_active(),
+                         node.get_attr<RangeAttribute>("remap"));
+  return true;
+}
+#endif
 
 } // namespace hesiod

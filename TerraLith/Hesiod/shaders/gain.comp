@@ -1,0 +1,44 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer DataBuf { float data[]; } data_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float gain;
+  float hmin;
+  float hmax;
+} pc;
+
+// Ken Perlin's gain function: remaps [0,1] with variable contrast
+float gain_function(float t, float g)
+{
+  if (t < 0.5)
+    return 0.5 * pow(2.0 * t, g);
+  else
+    return 1.0 - 0.5 * pow(2.0 - 2.0 * t, g);
+}
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  uint  idx = gid.y * pc.width + gid.x;
+  float v = data_buf.data[idx];
+
+  // Normalize to [0, 1]
+  float range = pc.hmax - pc.hmin;
+  float t = (range != 0.0) ? (v - pc.hmin) / range : 0.0;
+  t = clamp(t, 0.0, 1.0);
+
+  // Apply gain
+  t = gain_function(t, pc.gain);
+
+  // Remap back
+  data_buf.data[idx] = pc.hmin + t * range;
+}

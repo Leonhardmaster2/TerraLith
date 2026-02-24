@@ -1,0 +1,54 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer DataBuf { float data[]; } data_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float range_min;
+  float range_max;
+  float hmin;
+  float hmax;
+  float k_smoothing;
+} pc;
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  uint  idx = gid.y * pc.width + gid.x;
+  float v = data_buf.data[idx];
+
+  // Normalize to [0, 1]
+  float range = pc.hmax - pc.hmin;
+  float t = (range != 0.0) ? (v - pc.hmin) / range : 0.0;
+
+  // Apply saturate: compress values outside [range_min, range_max]
+  // using smooth clamping with sigmoid-like transitions
+  float low = pc.range_min;
+  float high = pc.range_max;
+  float k = pc.k_smoothing;
+
+  if (k > 0.0)
+  {
+    // Smooth min (lower bound): smoothly clamp to low
+    float d_low = t - low;
+    t = low + 0.5 * (d_low + sqrt(d_low * d_low + k * k));
+
+    // Smooth max (upper bound): smoothly clamp to high
+    float d_high = high - t;
+    t = high - 0.5 * (d_high + sqrt(d_high * d_high + k * k)) + d_high;
+  }
+  else
+  {
+    t = clamp(t, low, high);
+  }
+
+  // Remap back
+  data_buf.data[idx] = pc.hmin + t * range;
+}
