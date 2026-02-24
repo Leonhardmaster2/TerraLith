@@ -1,0 +1,79 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer InputBuf  { float data[]; } input_buf;
+layout(set = 0, binding = 1) buffer OutputBuf { float data[]; } output_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float vmax;
+  int   ir;
+  float k_smoothing;
+} pc;
+
+float get_height(int x, int y)
+{
+  int cx = clamp(x, 0, int(pc.width) - 1);
+  int cy = clamp(y, 0, int(pc.height) - 1);
+  return input_buf.data[cy * pc.width + cx];
+}
+
+// Cubic pulse weight: (1 - t^2)^2 for |t| <= 1, 0 otherwise
+float cubic_pulse(float t)
+{
+  t = abs(t);
+  if (t >= 1.0)
+    return 0.0;
+  float t2 = t * t;
+  return (1.0 - t2) * (1.0 - t2);
+}
+
+// Polynomial smooth max (smooth clamp-from-below)
+float smooth_clamp_min(float val, float min_val, float k)
+{
+  if (k <= 0.0)
+    return max(val, min_val);
+  float h = max(k - abs(val - min_val), 0.0) / k;
+  return max(val, min_val) + 0.25 * h * h * k;
+}
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  int ix = int(gid.x);
+  int iy = int(gid.y);
+  uint idx = gid.y * pc.width + gid.x;
+
+  float z = input_buf.data[idx];
+
+  // Step 1: smooth clamp minimum to vmax
+  float z_clamped = smooth_clamp_min(z, pc.vmax, pc.k_smoothing);
+
+  // Step 2: weighted average using separable cubic pulse kernel
+  float sum = 0.0;
+  float weight_sum = 0.0;
+  float inv_r = 1.0 / float(pc.ir + 1);
+
+  for (int dy = -pc.ir; dy <= pc.ir; dy++)
+  {
+    float wy = cubic_pulse(float(dy) * inv_r);
+    for (int dx = -pc.ir; dx <= pc.ir; dx++)
+    {
+      float wx = cubic_pulse(float(dx) * inv_r);
+      float w = wx * wy;
+      sum += w * get_height(ix + dx, iy + dy);
+      weight_sum += w;
+    }
+  }
+
+  float z_filtered = sum / max(weight_sum, 1e-8);
+
+  // Step 3: combine (matching CPU: z = z_clamped + z_filtered - vmax)
+  output_buf.data[idx] = z_clamped + z_filtered - pc.vmax;
+}

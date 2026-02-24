@@ -127,7 +127,10 @@ if(HESIOD_ENABLE_VULKAN)
     ${SHADER_DIR}/combiner_divide.comp
     ${SHADER_DIR}/combiner_min.comp
     ${SHADER_DIR}/combiner_max.comp
-    ${SHADER_DIR}/combiner_blend.comp)
+    ${SHADER_DIR}/combiner_blend.comp
+    ${SHADER_DIR}/normal_map.comp
+    ${SHADER_DIR}/select_slope.comp
+    ${SHADER_DIR}/hydraulic_blur.comp)
 
   foreach(SHADER ${VULKAN_SHADERS})
     get_filename_component(SHADER_NAME ${SHADER} NAME_WE)
