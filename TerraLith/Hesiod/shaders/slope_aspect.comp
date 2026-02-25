@@ -1,0 +1,122 @@
+#version 450
+
+// Slope & Aspect compute shader — Sobel-style gradient filter
+//
+// Computes:
+//   - Slope (gradient magnitude) → output binding 1
+//   - Aspect (gradient direction in radians, atan2) → output binding 2
+//
+// Uses Shared Memory (LDS) to load the 3x3 neighborhood once per workgroup,
+// following the pattern established in the hydraulic erosion shader.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer InputBuf   { float data[]; } input_buf;
+layout(set = 0, binding = 1) buffer SlopeBuf   { float data[]; } slope_buf;
+layout(set = 0, binding = 2) buffer AspectBuf  { float data[]; } aspect_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint width;
+  uint height;
+} pc;
+
+// Shared memory tile for 3x3 neighborhood: (16+2) x (16+2) = 18x18
+shared float s_tile[18][18];
+
+// Clamped global read
+float read_height(int x, int y)
+{
+  int cx = clamp(x, 0, int(pc.width) - 1);
+  int cy = clamp(y, 0, int(pc.height) - 1);
+  return input_buf.data[cy * pc.width + cx];
+}
+
+// Load tile into shared memory with 1-pixel halo
+void load_shared_tile(int gx, int gy)
+{
+  int lx = int(gl_LocalInvocationID.x);
+  int ly = int(gl_LocalInvocationID.y);
+
+  // Each thread loads its own pixel + halo border
+  s_tile[ly + 1][lx + 1] = read_height(gx, gy);
+
+  // Left halo
+  if (lx == 0)
+    s_tile[ly + 1][0] = read_height(gx - 1, gy);
+
+  // Right halo
+  if (lx == 15)
+    s_tile[ly + 1][17] = read_height(gx + 1, gy);
+
+  // Top halo
+  if (ly == 0)
+    s_tile[0][lx + 1] = read_height(gx, gy - 1);
+
+  // Bottom halo
+  if (ly == 15)
+    s_tile[17][lx + 1] = read_height(gx, gy + 1);
+
+  // Corners
+  if (lx == 0 && ly == 0)
+    s_tile[0][0] = read_height(gx - 1, gy - 1);
+  if (lx == 15 && ly == 0)
+    s_tile[0][17] = read_height(gx + 1, gy - 1);
+  if (lx == 0 && ly == 15)
+    s_tile[17][0] = read_height(gx - 1, gy + 1);
+  if (lx == 15 && ly == 15)
+    s_tile[17][17] = read_height(gx + 1, gy + 1);
+
+  barrier();
+}
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  int gx = int(gid.x);
+  int gy = int(gid.y);
+
+  // Load 3x3 neighborhood into shared memory
+  load_shared_tile(gx, gy);
+
+  int lx = int(gl_LocalInvocationID.x) + 1;
+  int ly = int(gl_LocalInvocationID.y) + 1;
+
+  // Read 3x3 neighborhood from shared memory
+  //   z00 z01 z02
+  //   z10 z11 z12
+  //   z20 z21 z22
+  float z00 = s_tile[ly - 1][lx - 1];
+  float z01 = s_tile[ly - 1][lx    ];
+  float z02 = s_tile[ly - 1][lx + 1];
+  float z10 = s_tile[ly    ][lx - 1];
+  // z11 = s_tile[ly][lx]; // center — not needed for Sobel
+  float z12 = s_tile[ly    ][lx + 1];
+  float z20 = s_tile[ly + 1][lx - 1];
+  float z21 = s_tile[ly + 1][lx    ];
+  float z22 = s_tile[ly + 1][lx + 1];
+
+  // Sobel kernels:
+  //   Gx = [[-1, 0, 1],      Gy = [[-1, -2, -1],
+  //         [-2, 0, 2],            [ 0,  0,  0],
+  //         [-1, 0, 1]]            [ 1,  2,  1]]
+  float gx_val = (-z00 + z02 - 2.0 * z10 + 2.0 * z12 - z20 + z22);
+  float gy_val = (-z00 - 2.0 * z01 - z02 + z20 + 2.0 * z21 + z22);
+
+  // Normalize by 8 (Sobel weighting sum) for proper gradient scale
+  gx_val *= 0.125;
+  gy_val *= 0.125;
+
+  // Slope = gradient magnitude
+  float slope_val = sqrt(gx_val * gx_val + gy_val * gy_val);
+
+  // Aspect = gradient direction (radians, range [-pi, pi])
+  float aspect_val = atan(gy_val, gx_val);
+
+  uint idx = gid.y * pc.width + gid.x;
+  slope_buf.data[idx]  = slope_val;
+  aspect_buf.data[idx] = aspect_val;
+}
