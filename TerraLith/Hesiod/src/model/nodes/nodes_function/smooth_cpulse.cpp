@@ -83,17 +83,11 @@ bool compute_smooth_cpulse_node_vulkan(BaseNode &node)
   if (!p_in)
     return false;
 
-  // Fall back to CPU when a mask is connected (masking requires per-pixel
-  // blending between original and blurred data that the separable GPU shaders
-  // do not handle).
-  hmap::Heightmap *p_mask = node.get_value_ref<hmap::Heightmap>("mask");
-  if (p_mask)
-    return false;
-
   auto &gp = VulkanGenericPipeline::instance();
   if (!gp.is_ready())
     return false;
 
+  hmap::Heightmap *p_mask = node.get_value_ref<hmap::Heightmap>("mask");
   hmap::Heightmap *p_out = node.get_value_ref<hmap::Heightmap>("output");
 
   float radius = node.get_attr<FloatAttribute>("radius");
@@ -106,14 +100,18 @@ bool compute_smooth_cpulse_node_vulkan(BaseNode &node)
   // Copy input to output first (matching CPU path)
   *p_out = *p_in;
 
-  // Push constants shared by both horizontal and vertical passes
+  // Push constants shared by both horizontal and vertical passes.
+  // has_mask tells the V-pass whether to blend with the original via the mask.
   struct
   {
     uint32_t width;
     uint32_t height;
     int32_t  radius;
     float    sigma;
+    int32_t  has_mask;
   } pc{};
+
+  pc.has_mask = (p_mask != nullptr) ? 1 : 0;
 
   for (size_t i = 0; i < p_out->get_ntiles(); ++i)
   {
@@ -144,6 +142,19 @@ bool compute_smooth_cpulse_node_vulkan(BaseNode &node)
                             VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
+    // original_buf: holds unblurred data for mask blending (V-pass binding 2)
+    VulkanBuffer original_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    original_buf.upload(tile_out.vector.data(), buf_size);
+
+    // mask_buf: per-pixel blend alpha (V-pass binding 3)
+    VulkanBuffer mask_gpu_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                  VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (p_mask)
+      mask_gpu_buf.upload(p_mask->tiles[i].vector.data(), buf_size);
+
     // Pass 1: Horizontal blur — input_buf -> temp_buf
     {
       std::vector<VulkanBuffer *> buffers = {&input_buf, &temp_buf};
@@ -152,8 +163,10 @@ bool compute_smooth_cpulse_node_vulkan(BaseNode &node)
     }
 
     // Pass 2: Vertical blur — temp_buf -> output_buf
+    // Bindings: 0=temp(h-blurred), 1=output, 2=original, 3=mask
     {
-      std::vector<VulkanBuffer *> buffers = {&temp_buf, &output_buf};
+      std::vector<VulkanBuffer *> buffers = {&temp_buf, &output_buf,
+                                             &original_buf, &mask_gpu_buf};
       gp.dispatch("blur_vertical", &pc, sizeof(pc), buffers,
                   pc.width, (pc.height + 255) / 256);
     }

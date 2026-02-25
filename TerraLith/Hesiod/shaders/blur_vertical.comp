@@ -5,11 +5,18 @@
 // Reads from the temp buffer (output of horizontal pass), writes the final
 // blurred result. Configurable kernel radius via push constants.
 // Uses shared memory column tile for coalesced access.
+//
+// Optional mask support: when has_mask == 1, the shader blends the blurred
+// result with the original (pre-blur) input using the mask as an alpha:
+//   output = mix(original, blurred, mask)
+// This keeps the full GPU pipeline intact even when a mask is connected.
 
 layout(local_size_x = 1, local_size_y = 256) in;
 
-layout(set = 0, binding = 0) buffer InputBuf  { float data[]; } input_buf;
-layout(set = 0, binding = 1) buffer OutputBuf { float data[]; } output_buf;
+layout(set = 0, binding = 0) buffer InputBuf    { float data[]; } input_buf;
+layout(set = 0, binding = 1) buffer OutputBuf   { float data[]; } output_buf;
+layout(set = 0, binding = 2) buffer OriginalBuf { float data[]; } original_buf;
+layout(set = 0, binding = 3) buffer MaskBuf     { float data[]; } mask_buf;
 
 layout(push_constant) uniform PushConstants
 {
@@ -17,6 +24,7 @@ layout(push_constant) uniform PushConstants
   uint  height;
   int   radius;    // kernel half-size
   float sigma;     // Gaussian standard deviation
+  int   has_mask;  // 0 = no mask, 1 = blend with original using mask
 } pc;
 
 // Shared memory tile: each workgroup column loads (256 + 2*radius) samples.
@@ -75,5 +83,19 @@ void main()
     weight_sum += w;
   }
 
-  output_buf.data[gy * pc.width + gx] = sum / weight_sum;
+  float blurred = sum / weight_sum;
+
+  uint idx = gy * pc.width + gx;
+
+  if (pc.has_mask != 0)
+  {
+    // Blend: where mask is 1.0 use blurred, where 0.0 keep original
+    float orig = original_buf.data[idx];
+    float m    = mask_buf.data[idx];
+    output_buf.data[idx] = mix(orig, blurred, m);
+  }
+  else
+  {
+    output_buf.data[idx] = blurred;
+  }
 }

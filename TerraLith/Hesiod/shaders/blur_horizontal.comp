@@ -17,6 +17,7 @@ layout(push_constant) uniform PushConstants
   uint  height;
   int   radius;    // kernel half-size (total tap count = 2*radius + 1)
   float sigma;     // Gaussian standard deviation
+  int   has_mask;  // unused in H-pass, present for struct layout parity with V-pass
 } pc;
 
 // Shared memory tile: each workgroup row loads (256 + 2*radius) samples.
