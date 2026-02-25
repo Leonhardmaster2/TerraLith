@@ -69,7 +69,6 @@ private:
   // Persistent cache
   std::unique_ptr<VulkanBuffer> persistent_staging_buffer_;
   std::unique_ptr<VulkanBuffer> persistent_storage_buffer_;
-  VkDescriptorPool              descriptor_pool_ = VK_NULL_HANDLE;
   VkDescriptorSet               descriptor_set_  = VK_NULL_HANDLE;
   size_t                        current_buffer_capacity_ = 0;
 };

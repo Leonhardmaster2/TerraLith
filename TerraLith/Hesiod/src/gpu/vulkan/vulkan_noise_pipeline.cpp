@@ -66,12 +66,12 @@ VulkanNoisePipeline::~VulkanNoisePipeline()
 
   VkDevice device = ctx.device();
 
-  // Destroy persistent buffers before the pool and device
+  // Destroy persistent buffers before freeing descriptor set
   this->persistent_staging_buffer_.reset();
   this->persistent_storage_buffer_.reset();
 
-  if (this->descriptor_pool_ != VK_NULL_HANDLE)
-    vkDestroyDescriptorPool(device, this->descriptor_pool_, nullptr);
+  if (this->descriptor_set_ != VK_NULL_HANDLE)
+    ctx.free_descriptor_set(this->descriptor_set_);
   if (this->pipeline_ != VK_NULL_HANDLE)
     vkDestroyPipeline(device, this->pipeline_, nullptr);
   if (this->pipeline_layout_ != VK_NULL_HANDLE)
@@ -157,34 +157,8 @@ void VulkanNoisePipeline::init()
     if (result != VK_SUCCESS)
       throw std::runtime_error("Failed to create compute pipeline");
 
-    // --- Persistent descriptor pool ---
-    VkDescriptorPoolSize desc_pool_size{};
-    desc_pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    desc_pool_size.descriptorCount = 10;
-
-    VkDescriptorPoolCreateInfo desc_pool_info{};
-    desc_pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    desc_pool_info.maxSets = 10;
-    desc_pool_info.poolSizeCount = 1;
-    desc_pool_info.pPoolSizes = &desc_pool_size;
-
-    result = vkCreateDescriptorPool(device,
-                                    &desc_pool_info,
-                                    nullptr,
-                                    &this->descriptor_pool_);
-    if (result != VK_SUCCESS)
-      throw std::runtime_error("Failed to create persistent descriptor pool");
-
-    // Allocate the persistent descriptor set
-    VkDescriptorSetAllocateInfo desc_alloc{};
-    desc_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc.descriptorPool = this->descriptor_pool_;
-    desc_alloc.descriptorSetCount = 1;
-    desc_alloc.pSetLayouts = &this->desc_layout_;
-
-    result = vkAllocateDescriptorSets(device, &desc_alloc, &this->descriptor_set_);
-    if (result != VK_SUCCESS)
-      throw std::runtime_error("Failed to allocate persistent descriptor set");
+    // Allocate persistent descriptor set from global pool
+    this->descriptor_set_ = ctx.allocate_descriptor_set(this->desc_layout_);
 
     this->ready_ = true;
     Logger::log()->info("VulkanNoisePipeline initialized successfully");

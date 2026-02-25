@@ -146,28 +146,8 @@ bool VulkanComputeTest::run_add_test(size_t num_elements)
     vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
                              &pipeline);
 
-    // --- Descriptor pool and set ---
-    VkDescriptorPoolSize pool_size{};
-    pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    pool_size.descriptorCount = 3;
-
-    VkDescriptorPoolCreateInfo pool_info{};
-    pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    pool_info.maxSets = 1;
-    pool_info.poolSizeCount = 1;
-    pool_info.pPoolSizes = &pool_size;
-
-    VkDescriptorPool desc_pool;
-    vkCreateDescriptorPool(device, &pool_info, nullptr, &desc_pool);
-
-    VkDescriptorSetAllocateInfo desc_alloc{};
-    desc_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    desc_alloc.descriptorPool = desc_pool;
-    desc_alloc.descriptorSetCount = 1;
-    desc_alloc.pSetLayouts = &desc_layout;
-
-    VkDescriptorSet desc_set;
-    vkAllocateDescriptorSets(device, &desc_alloc, &desc_set);
+    // --- Descriptor set from global pool ---
+    VkDescriptorSet desc_set = ctx.allocate_descriptor_set(desc_layout);
 
     // Write descriptor set
     VkDescriptorBufferInfo buffer_infos[3] = {};
@@ -231,9 +211,9 @@ bool VulkanComputeTest::run_add_test(size_t num_elements)
     }
 
     // --- Cleanup Vulkan objects ---
+    ctx.free_descriptor_set(desc_set);
     vkDestroyPipeline(device, pipeline, nullptr);
     vkDestroyPipelineLayout(device, pipeline_layout, nullptr);
-    vkDestroyDescriptorPool(device, desc_pool, nullptr);
     vkDestroyDescriptorSetLayout(device, desc_layout, nullptr);
     vkDestroyShaderModule(device, shader_module, nullptr);
 
