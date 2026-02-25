@@ -1,0 +1,184 @@
+/* Copyright (c) 2025 Otto Link. Distributed under the terms of the GNU General
+ * Public License. The full license is in the file LICENSE, distributed with
+ * this software. */
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(set = 0, binding = 0) buffer OutputBuf { float data[]; } output_buf;
+layout(set = 0, binding = 1) buffer AngleBuf  { float data[]; } angle_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float kw_x;
+  float kw_y;
+  uint  seed;
+  float angle_spread_ratio;
+  int   octaves;
+  float weight;
+  float persistence;
+  float lacunarity;
+  float bbox_x;         // xmin
+  float bbox_y;         // ymin
+  float bbox_z;         // xmax
+  float bbox_w;         // ymax
+  int   has_ctrl;
+  int   has_noise_x;
+  int   has_noise_y;
+} pc;
+
+// --- Polynomial 2D hash (matches OpenCL hash22f_poly) ---
+
+vec2 hash22f_poly(vec2 x, float fseed)
+{
+  const vec2 k = vec2(0.3183099, 0.3678794);
+  x = x * k + k.yx;
+  return fract(16.0 * k * fract(x.x * x.y * (x.x + x.y) + fseed));
+}
+
+// --- Wang hash for seed → float ---
+
+uint wang_hash(uint seed_val)
+{
+  seed_val = (seed_val ^ 61u) ^ (seed_val >> 16u);
+  seed_val *= 9u;
+  seed_val = seed_val ^ (seed_val >> 4u);
+  seed_val *= 0x27d4eb2du;
+  seed_val = seed_val ^ (seed_val >> 15u);
+  return seed_val;
+}
+
+float rand_from_seed(uint seed_val)
+{
+  uint h = wang_hash(seed_val);
+  // Xorshift step
+  h ^= (h << 13u);
+  h ^= (h >> 17u);
+  h ^= (h << 5u);
+  return float(h) * (1.0 / 4294967296.0);
+}
+
+// --- Gabor wave scalar (Inigo Quilez, shadertoy.com/view/clGyWm) ---
+//
+// Core math:
+//   Gaussian envelope:  w  = exp(-fa * dot(r,r))     (fa = 4.0)
+//   Harmonic component: cs = cos(fr * dot(r,k))      (fr = 2π)
+//   Accumulate: av += w * cs,  at += w
+//   Result = av / at  (normalized)
+
+float gabor_wave_scalar(vec2 p, vec2 dir, float angle_spread_ratio, float fseed)
+{
+  vec2 ip = floor(p);
+  vec2 fp = fract(p);
+
+  const float fr = 6.283185;   // 2π
+  const float fa = 4.0;
+
+  float av = 0.0;
+  float at = 0.0;
+
+  for (int j = -2; j <= 2; j++)
+  {
+    for (int i = -2; i <= 2; i++)
+    {
+      vec2 o = vec2(float(i), float(j));
+      vec2 h = hash22f_poly(ip + o, fseed);
+      vec2 r = fp - (o + h);
+
+      vec2 s = vec2(11.0, 31.0);
+      vec2 k = normalize(dir +
+                         angle_spread_ratio *
+                             (2.0 * hash22f_poly(ip + o + s, fseed) - 1.0));
+
+      float d = dot(r, r);
+      float l = dot(r, k);
+      float w = exp(-fa * d);
+      float cs = cos(fr * l);
+
+      av += w * cs;
+      at += w;
+    }
+  }
+
+  return av / at;
+}
+
+// --- FBM layering of Gabor wave ---
+
+float gabor_wave_scalar_fbm(vec2 p, vec2 dir, float angle_spread_ratio,
+                             int octaves, float weight_param,
+                             float persistence, float lacunarity,
+                             float fseed)
+{
+  float n = 0.0;
+  float nf = 1.0;
+  float na = 0.6;
+
+  for (int i = 0; i < octaves; i++)
+  {
+    float v = gabor_wave_scalar(p * nf, dir, angle_spread_ratio, fseed);
+    n += v * na;
+    na *= (1.0 - weight_param) + weight_param * min(v + 1.0, 2.0) * 0.5;
+    na *= persistence;
+    nf *= lacunarity;
+  }
+  return n;
+}
+
+// --- Coordinate mapping (matches OpenCL g_to_xy) ---
+
+vec2 g_to_xy(uvec2 g, uint nx, uint ny, float kx, float ky,
+             float dx, float dy, vec4 bbox)
+{
+  float x = float(g.x) / float(nx);
+  float y = float(g.y) / float(ny);
+
+  x = kx * (x * (bbox.y - bbox.x) + bbox.x) + kx * dx;
+  y = ky * (y * (bbox.w - bbox.z) + bbox.z) + ky * dy;
+
+  return vec2(x, y);
+}
+
+// --- Angle to direction (matches OpenCL angle_to_dir) ---
+
+vec2 angle_to_dir(float angle_deg)
+{
+  float a = angle_deg / 180.0 * 3.14159;
+  return vec2(cos(a), sin(a));
+}
+
+// --- Main ---
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  uint index = gid.y * pc.width + gid.x;
+
+  // Derive float seed from integer seed (matches OpenCL wang_hash + rand)
+  float fseed = rand_from_seed(pc.seed);
+
+  // Map pixel to world coordinates
+  // "0.5 * kw" to keep coherent with Perlin (as in the OpenCL kernel)
+  vec2 pos = g_to_xy(gid, pc.width, pc.height,
+                     0.5 * pc.kw_x, 0.5 * pc.kw_y,
+                     0.0, 0.0,
+                     vec4(pc.bbox_x, pc.bbox_z, pc.bbox_y, pc.bbox_w));
+
+  // Read per-pixel angle from angle buffer and convert to direction
+  vec2 dir = angle_to_dir(angle_buf.data[index]);
+
+  output_buf.data[index] = gabor_wave_scalar_fbm(
+      pos,
+      dir,
+      pc.angle_spread_ratio,
+      pc.octaves,
+      pc.weight,
+      pc.persistence,
+      pc.lacunarity,
+      fseed);
+}
