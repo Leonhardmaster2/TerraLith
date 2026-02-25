@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.12)
-project(hesiod-root VERSION 0.5.0)
+project(hesiod-root VERSION 0.5.1)
 
 set(EXECUTABLE_OUTPUT_PATH ${CMAKE_BINARY_DIR}/bin)
 
@@ -24,7 +24,7 @@ option(HESIOD_ENABLE_LTO "Enable LTO and unused-function detection" OFF)
 option(HESIOD_UNUSED_FUNCTIONS "Detect unused static functions" OFF)
 
 # Vulkan compute support
-option(HESIOD_ENABLE_VULKAN "Enable Vulkan compute support" OFF)
+option(HESIOD_ENABLE_VULKAN "Enable Vulkan compute support" ON)
 
 # ------------------------------
 # Modules

@@ -4,9 +4,8 @@
 //
 // Each iteration:
 //   1. Compute D8/D-inf flow accumulation via iterative relaxation
-//   2. Clip and remap flow accumulation
-//   3. Optional cone-kernel smoothing
-//   4. Apply erosion: z -= c_erosion * facc
+//   2. Clip flow accumulation using clipping_ratio to prevent runaway values
+//   3. Apply erosion: z -= c_erosion * clipped_facc * mask
 //
 // Uses shared memory (local memory) for 3x3 neighborhood slope lookups.
 
@@ -35,11 +34,14 @@ layout(push_constant) uniform PushConstants
   uint  pass_type;      // 0 = flow accumulation relaxation, 1 = erosion apply
 } pc;
 
+// Small epsilon to prevent division by zero
+const float EPSILON = 1.0e-5;
+
 // Shared memory tile for 3x3 neighborhood slope calculations.
 // Tile dimensions: (16+2) x (16+2) = 18x18
 shared float s_tile[18][18];
 
-// Clamped global read
+// Clamped global read — guarantees in-bounds access
 float read_height(int x, int y)
 {
   int cx = clamp(x, 0, int(pc.width) - 1);
@@ -107,6 +109,9 @@ void compute_flow_accumulation_step(int gx, int gy, uint idx)
   const int   dy[8] = int[8](-1, -1, -1, 0, 0,  1,  1,  1);
   const float dist[8] = float[8](1.414, 1.0, 1.414, 1.0, 1.0, 1.414, 1.0, 1.414);
 
+  // Safeguard: if talus_ref is degenerate, skip accumulation
+  float safe_talus = max(pc.talus_ref, EPSILON);
+
   // Compute D-inf proportional flow accumulation:
   // For each cell, accumulate flow from upslope neighbors proportionally.
   float total_slope = 0.0;
@@ -116,8 +121,13 @@ void compute_flow_accumulation_step(int gx, int gy, uint idx)
   {
     int nx = lx + dx[k];
     int ny = ly + dy[k];
+
+    // Bounds-check shared tile access (should always be 0..17 but be safe)
+    nx = clamp(nx, 0, 17);
+    ny = clamp(ny, 0, 17);
+
     float z_n = s_tile[ny][nx];
-    float slope = (z_n - z_center) / (dist[k] * pc.talus_ref);
+    float slope = (z_n - z_center) / (dist[k] * safe_talus);
 
     if (slope > 0.0)
     {
@@ -130,10 +140,17 @@ void compute_flow_accumulation_step(int gx, int gy, uint idx)
   }
 
   // Flow accumulation: 1 (self) + weighted contribution from upslope neighbors
+  // Use epsilon-safe denominator to prevent division by zero
   float new_facc = 1.0;
-  if (total_slope > 0.0)
+  if (total_slope > EPSILON)
     new_facc += weighted_facc / total_slope;
 
+  // Do NOT clip per-iteration.  The CPU path computes full D-inf flow
+  // accumulation without any per-step cap, then clips ONCE at the end.
+  // Per-iteration clipping prevents realistic flow accumulation, capping
+  // values at clipping_ratio (e.g. 10) when they should reach hundreds.
+  // The CPU-side remap stage (in vulkan_erosion_pipeline.cpp) handles
+  // clipping and normalization after all iterations complete.
   flow_acc.facc[idx] = new_facc;
 }
 
@@ -144,17 +161,29 @@ void apply_erosion(int gx, int gy, uint idx)
   if (m <= 0.0)
     return;
 
+  // Flow accumulation has already been clipped and remapped to [0, 1]
+  // by the CPU-side remap stage (matching the CPU hmap::hydraulic_stream
+  // behavior: vmax = clipping_ratio * sqrt(mean(facc)), clamp, remap).
   float facc_val = flow_acc.facc[idx];
   float z_old = heightmap.height[idx];
 
-  // Apply erosion: z -= c_erosion * facc * mask
+  // Compute erosion amount (facc_val is in [0, 1] from CPU-side remap)
   float dz = pc.c_erosion * facc_val * m;
+
+  // Clamp erosion: cannot erode more than the available height above zero,
+  // and dz must be non-negative
+  dz = clamp(dz, 0.0, max(z_old, 0.0));
+
   float z_new = z_old - dz;
+
+  // Final NaN/Inf guard: if something still went wrong, preserve old value
+  if (isinf(z_new) || isnan(z_new))
+    z_new = z_old;
 
   heightmap.height[idx] = z_new;
 
-  // Accumulate erosion amount
-  erosion_map.erosion[idx] += max(dz, 0.0);
+  // Accumulate erosion amount (clamped positive)
+  erosion_map.erosion[idx] += dz;
 }
 
 void main()

@@ -131,7 +131,7 @@ if(HESIOD_ENABLE_VULKAN)
     ${SHADER_DIR}/normal_map.comp
     ${SHADER_DIR}/select_slope.comp
     ${SHADER_DIR}/hydraulic_blur.comp
-    ${SHADER_DIR}/gabor_wave_fbm.comp)
+    ${SHADER_DIR}/gabor_wave_fbm.comp
     ${SHADER_DIR}/hydraulic_erosion.comp)
 
   foreach(SHADER ${VULKAN_SHADERS})

@@ -2,7 +2,9 @@
  * Public License. The full license is in the file LICENSE, distributed with
  * this software. */
 #include <QFormLayout>
+#include <QLabel>
 #include <QPushButton>
+#include <format>
 
 #include "hesiod/app/hesiod_application.hpp"
 #include "hesiod/gui/widgets/app_settings_window.hpp"
@@ -114,6 +116,46 @@ void AppSettingsWindow::setup_layout()
 
   this->bind_bool("Add border skirt to the heightmap",
                   ctx.app_settings.viewer.add_heighmap_skirt);
+
+  this->add_description("\n");
+
+  // --- Version info
+
+  this->add_title("About");
+
+  {
+    std::string version_str = std::format("v{}.{}.{}",
+                                          HESIOD_VERSION_MAJOR,
+                                          HESIOD_VERSION_MINOR,
+                                          HESIOD_VERSION_PATCH);
+
+    QLabel *version_label = new QLabel(version_str.c_str());
+
+    std::string style = std::format(
+        "color: {}; font-weight: bold;",
+        HSD_CTX.app_settings.colors.text_primary.name().toStdString());
+    version_label->setStyleSheet(style.c_str());
+
+    layout->addRow("Version", version_label);
+  }
+
+#ifdef HESIOD_HAS_VULKAN
+  {
+    QLabel *gpu_label = new QLabel("Vulkan Compute");
+
+    std::string style = std::format(
+        "color: #00FFAA; font-weight: bold;",
+        HSD_CTX.app_settings.colors.text_primary.name().toStdString());
+    gpu_label->setStyleSheet(style.c_str());
+
+    layout->addRow("GPU Backend", gpu_label);
+  }
+#else
+  {
+    QLabel *gpu_label = new QLabel("OpenCL");
+    layout->addRow("GPU Backend", gpu_label);
+  }
+#endif
 }
 
 } // namespace hesiod

@@ -2,6 +2,7 @@
  * Public License. The full license is in the file LICENSE, distributed with
  * this software. */
 #include <chrono>
+#include <cmath>
 
 #include "highmap/erosion.hpp"
 
@@ -35,11 +36,12 @@ void setup_hydraulic_stream_node(BaseNode &node)
   node.add_attr<FloatAttribute>("talus_ref", "talus_ref", 0.1f, 0.01f, 10.f);
   node.add_attr<FloatAttribute>("radius", "radius", 0.f, 0.f, 0.05f);
   node.add_attr<FloatAttribute>("clipping_ratio", "clipping_ratio", 10.f, 0.1f, 100.f);
-  node.add_attr<BoolAttribute>("GPU", "GPU", HSD_DEFAULT_GPU_MODE);
 
   // attribute(s) order
-  node.set_attr_ordered_key(
-      {"c_erosion", "talus_ref", "radius", "clipping_ratio", "_SEPARATOR_", "GPU"});
+  // NOTE: Vulkan GPU toggle is provided by node_settings_widget ("Enable GPU
+  // Compute" checkbox) for all DECLARE_NODE_VULKAN nodes — no manual "GPU"
+  // attribute needed here.
+  node.set_attr_ordered_key({"c_erosion", "talus_ref", "radius", "clipping_ratio"});
 }
 
 void compute_hydraulic_stream_node(BaseNode &node)
@@ -110,56 +112,18 @@ bool compute_hydraulic_stream_node_vulkan(BaseNode &node)
   // Copy input to output first (matching CPU path)
   *p_out = *p_in;
 
-  // Number of flow-accumulation relaxation iterations
-  static constexpr uint32_t NUM_ITERATIONS = 50;
-
-  // Track whether this is the first run (for baseline comparison)
-  static bool first_run = true;
-
-  Logger::log()->info("═══════════════════════════════════════════════");
-  Logger::log()->info("═══ VULKAN SIMULATION ACTIVE ═══");
-  Logger::log()->info("═══════════════════════════════════════════════");
-
-  // --- Comparative diagnostic: CPU baseline on first run ---
-  double cpu_baseline_ms = 0.0;
-
-  if (first_run)
-  {
-    Logger::log()->info("[vulkan] Running CPU baseline for comparison...");
-
-    // Run CPU path on first tile for baseline timing
-    if (p_out->get_ntiles() > 0)
-    {
-      auto &tile_baseline = p_out->tiles[0];
-
-      hmap::Array baseline_copy = tile_baseline;
-      int ir_baseline = (int)(node.get_attr<FloatAttribute>("radius") * tile_baseline.shape.x);
-
-      auto t_cpu_start = Clock::now();
-
-      hmap::hydraulic_stream(baseline_copy,
-                             c_erosion,
-                             talus_ref,
-                             nullptr,
-                             nullptr,
-                             nullptr,
-                             ir_baseline,
-                             clipping_ratio);
-
-      auto t_cpu_end = Clock::now();
-
-      cpu_baseline_ms =
-          std::chrono::duration<double, std::milli>(t_cpu_end - t_cpu_start).count();
-
-      Logger::log()->info("[vulkan] CPU/OpenCL Baseline (1 tile): {:.2f} ms", cpu_baseline_ms);
-    }
-  }
+  // Number of flow-accumulation relaxation iterations.
+  // Each iteration propagates flow one cell downhill.  We need enough
+  // iterations for flow to traverse the longest drainage path across
+  // the tile.  max(width, height) covers most realistic terrain paths
+  // (CPU's D-inf handles this in one topological pass, our iterative
+  // relaxation needs explicit propagation steps).
 
   // --- Vulkan dispatch per tile ---
-  auto t_vulkan_total_start = Clock::now();
-
-  double total_gpu_dispatch_ms = 0.0;
-  double total_barrier_stall_ms = 0.0;
+  // This mirrors the CPU path which also processes tiles independently via
+  // hmap::transform.  Tile overlap regions are smoothed by
+  // smooth_overlap_buffers() after all tiles complete.
+  auto t_start = Clock::now();
 
   for (size_t i = 0; i < p_out->get_ntiles(); ++i)
   {
@@ -178,53 +142,61 @@ bool compute_hydraulic_stream_node_vulkan(BaseNode &node)
     if (p_erosion_map && i < p_erosion_map->get_ntiles())
       erosion_data = p_erosion_map->tiles[i].vector.data();
 
-    auto metrics = ep.compute_erosion(tile_out.vector.data(),
-                                      erosion_data,
-                                      mask_data,
-                                      w,
-                                      h,
-                                      c_erosion,
-                                      talus_ref,
-                                      clipping_ratio,
-                                      NUM_ITERATIONS);
+    uint32_t num_iterations = std::max(w, h);
 
-    total_gpu_dispatch_ms += metrics.total_gpu_dispatch_ms;
-    total_barrier_stall_ms += metrics.memory_barrier_stall_ms;
+    ep.compute_erosion(tile_out.vector.data(),
+                       erosion_data,
+                       mask_data,
+                       w,
+                       h,
+                       c_erosion,
+                       talus_ref,
+                       clipping_ratio,
+                       num_iterations);
+
+    // --- CPU-side sanitization: catch any NaN/Inf/extreme values that
+    // survived the GPU pipeline (driver bugs, coherency glitches, etc.) ---
+    {
+      size_t num_pixels = static_cast<size_t>(w) * h;
+      int    corrupt_count = 0;
+
+      for (size_t px = 0; px < num_pixels; ++px)
+      {
+        float &val = tile_out.vector[px];
+        if (std::isnan(val) || std::isinf(val) || val > 10000.0f || val < -10000.0f)
+        {
+          val = 0.0f;
+          ++corrupt_count;
+        }
+      }
+
+      if (erosion_data)
+      {
+        for (size_t px = 0; px < num_pixels; ++px)
+        {
+          float &val = erosion_data[px];
+          if (std::isnan(val) || std::isinf(val) || val > 10000.0f || val < -10000.0f)
+          {
+            val = 0.0f;
+            ++corrupt_count;
+          }
+        }
+      }
+
+      if (corrupt_count > 0)
+        Logger::log()->warn("[vulkan] hydraulic_stream tile {}: sanitized {} corrupt "
+                            "values (NaN/Inf/extreme) in GPU readback",
+                            i,
+                            corrupt_count);
+    }
   }
 
-  auto t_vulkan_total_end = Clock::now();
+  auto t_end = Clock::now();
+  double total_ms = std::chrono::duration<double, std::milli>(t_end - t_start).count();
 
-  double vulkan_total_ms =
-      std::chrono::duration<double, std::milli>(t_vulkan_total_end - t_vulkan_total_start)
-          .count();
-
-  // --- Performance logging ---
-  double per_iter_avg = (NUM_ITERATIONS > 0) ? total_gpu_dispatch_ms / NUM_ITERATIONS : 0.0;
-
-  Logger::log()->info("[vulkan] Iteration Count: {}", NUM_ITERATIONS);
-  Logger::log()->info("[vulkan] Total GPU Dispatch Time: {:.2f} ms", total_gpu_dispatch_ms);
-  Logger::log()->info("[vulkan] Per-Iteration Average: {:.2f} ms", per_iter_avg);
-  Logger::log()->info("[vulkan] Memory Barrier Stall Time (Estimated): {:.2f} ms",
-                      total_barrier_stall_ms);
-
-  // --- Comparative diagnostic on first run ---
-  if (first_run && cpu_baseline_ms > 0.0)
-  {
-    // Scale CPU baseline to estimate full-run time (all tiles * iterations)
-    double cpu_estimated_total = cpu_baseline_ms * p_out->get_ntiles();
-    double speedup = cpu_estimated_total / vulkan_total_ms;
-
-    Logger::log()->info("[vulkan] ─────────────────────────────────────────");
-    Logger::log()->info("[vulkan] CPU Baseline (estimated total): {:.2f} ms",
-                        cpu_estimated_total);
-    Logger::log()->info("[vulkan] Vulkan Total: {:.2f} ms", vulkan_total_ms);
-    Logger::log()->info("[vulkan] Speedup: {:.1f}x faster", speedup);
-    Logger::log()->info("[vulkan] ─────────────────────────────────────────");
-
-    first_run = false;
-  }
-
-  Logger::log()->info("═══════════════════════════════════════════════");
+  Logger::log()->info("[vulkan] hydraulic_stream: {} tiles, {:.1f} ms total",
+                      p_out->get_ntiles(),
+                      total_ms);
 
   p_out->smooth_overlap_buffers();
 

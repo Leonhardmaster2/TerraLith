@@ -3,7 +3,9 @@
  * this software. */
 #ifdef HESIOD_HAS_VULKAN
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -224,12 +226,13 @@ void VulkanErosionPipeline::ensure_capacity(uint32_t width, uint32_t height)
       this->current_capacity_,
       padded);
 
-  // Allocate all 4 buffers as host-visible for direct upload/download
+  // Allocate all 4 buffers as host-visible for direct upload/download.
+  // TRANSFER_DST_BIT is required for vkCmdFillBuffer (GPU-side zeroing).
   auto make_buf = [buf_size]()
   {
     return std::make_unique<VulkanBuffer>(
         buf_size,
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
         VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   };
 
@@ -292,18 +295,9 @@ ErosionPerformanceMetrics VulkanErosionPipeline::compute_erosion(
   // Ensure GPU buffers are large enough
   this->ensure_capacity(width, height);
 
-  // Upload heightmap
+  // Upload heightmap and mask via host path (these carry real per-tile data)
   this->heightmap_buf_->upload(heightmap_data, buf_size);
 
-  // Initialize flow accumulation to 1.0 (each cell contributes 1 unit)
-  std::vector<float> facc_init(num_pixels, 1.0f);
-  this->flow_acc_buf_->upload(facc_init.data(), buf_size);
-
-  // Initialize erosion map to 0.0
-  std::vector<float> erosion_init(num_pixels, 0.0f);
-  this->erosion_buf_->upload(erosion_init.data(), buf_size);
-
-  // Upload mask (all 1s if nullptr)
   if (mask_data)
   {
     this->mask_buf_->upload(mask_data, buf_size);
@@ -318,6 +312,14 @@ ErosionPerformanceMetrics VulkanErosionPipeline::compute_erosion(
   uint32_t group_x = (width + 15) / 16;
   uint32_t group_y = (height + 15) / 16;
 
+  // Full buffer byte size (including headroom) for vkCmdFillBuffer.
+  // We zero the ENTIRE buffer, not just num_pixels, to eliminate any
+  // stale VRAM garbage in the headroom region.
+  VkDeviceSize full_buf_size = static_cast<VkDeviceSize>(this->current_capacity_) * sizeof(float);
+
+  // IEEE-754 bit pattern for 1.0f = 0x3F800000
+  static constexpr uint32_t FLOAT_ONE_BITS = 0x3F800000u;
+
   ErosionPushConstants pc{};
   pc.width = width;
   pc.height = height;
@@ -326,26 +328,44 @@ ErosionPerformanceMetrics VulkanErosionPipeline::compute_erosion(
   pc.clipping_ratio = clipping_ratio;
 
   auto t_total_start = Clock::now();
-  double barrier_stall_total_ms = 0.0;
 
   // =========================================================
-  // GPU Dispatch: flow accumulation relaxation iterations +
-  //               pipeline barriers between each iteration
+  // Stage 1: GPU flow accumulation (no per-iteration clipping)
+  // The shader writes raw accumulated flow values.  Clipping
+  // and normalization happen CPU-side between stages, matching
+  // the CPU hmap::hydraulic_stream algorithm exactly.
   // =========================================================
   ctx.submit_and_wait(
       [&](VkCommandBuffer cmd)
       {
+        // GPU-side buffer initialization (clean slate)
+        vkCmdFillBuffer(cmd, this->flow_acc_buf_->buffer(), 0, full_buf_size, FLOAT_ONE_BITS);
+        vkCmdFillBuffer(cmd, this->erosion_buf_->buffer(),  0, full_buf_size, 0);
+
+        // Barrier: TRANSFER_WRITE → COMPUTE_READ
+        VkMemoryBarrier fill_barrier{};
+        fill_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        fill_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        fill_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(cmd,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+                             0, 1, &fill_barrier, 0, nullptr, 0, nullptr);
+
+        // Bind pipeline and descriptors
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, this->pipeline_);
         vkCmdBindDescriptorSets(cmd,
                                 VK_PIPELINE_BIND_POINT_COMPUTE,
                                 this->pipeline_layout_,
-                                0,
-                                1,
-                                &this->descriptor_set_,
-                                0,
-                                nullptr);
+                                0, 1, &this->descriptor_set_, 0, nullptr);
 
-        // --- Flow accumulation: N relaxation iterations ---
+        // Flow accumulation — N relaxation iterations
+        VkMemoryBarrier compute_barrier{};
+        compute_barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        compute_barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        compute_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
         for (uint32_t iter = 0; iter < num_iterations; ++iter)
         {
           pc.pass_type = 0; // flow accumulation pass
@@ -359,26 +379,87 @@ ErosionPerformanceMetrics VulkanErosionPipeline::compute_erosion(
                              &pc);
           vkCmdDispatch(cmd, group_x, group_y, 1);
 
-          // CRITICAL: pipeline barrier between iterations to ensure
-          // heightmap/flow data is synchronized before next iteration
-          VkMemoryBarrier barrier{};
-          barrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-          barrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-          barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
           vkCmdPipelineBarrier(cmd,
                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-                               0,
-                               1,
-                               &barrier,
-                               0,
-                               nullptr,
-                               0,
-                               nullptr);
+                               0, 1, &compute_barrier, 0, nullptr, 0, nullptr);
         }
+      });
 
-        // --- Erosion apply pass ---
+  // =========================================================
+  // Stage 2: CPU-side flow accumulation clip and remap
+  //
+  // Matches CPU hmap::hydraulic_stream exactly:
+  //   vmax = clipping_ratio * sqrt( mean(facc) )
+  //   clamp(facc, 0, vmax)
+  //   remap(facc)           →  [0, 1]
+  //
+  // This data-dependent normalization ensures c_erosion
+  // operates on the same scale as the CPU path.
+  // =========================================================
+  {
+    std::vector<float> facc_data(num_pixels);
+    this->flow_acc_buf_->download(facc_data.data(), buf_size);
+
+    // Compute mean flow accumulation
+    double facc_sum = 0.0;
+    for (size_t i = 0; i < num_pixels; ++i)
+      facc_sum += static_cast<double>(facc_data[i]);
+    float mean_facc = static_cast<float>(facc_sum / static_cast<double>(num_pixels));
+
+    // Clip threshold — matches CPU:
+    //   float vmax = clipping_ratio * std::pow(facc.sum() / (float)facc.size(), 0.5f);
+    float vmax = clipping_ratio * std::sqrt(mean_facc);
+
+    // Clip to [0, vmax]
+    for (size_t i = 0; i < num_pixels; ++i)
+      facc_data[i] = std::clamp(facc_data[i], 0.0f, vmax);
+
+    // Find actual [min, max] for remap
+    float fmin = facc_data[0];
+    float fmax = facc_data[0];
+    for (size_t i = 1; i < num_pixels; ++i)
+    {
+      if (facc_data[i] < fmin) fmin = facc_data[i];
+      if (facc_data[i] > fmax) fmax = facc_data[i];
+    }
+
+    // Remap to [0, 1] — matches CPU remap(facc) which maps
+    // [array.min(), array.max()] → [0, 1]
+    if (fmax > fmin)
+    {
+      float inv_range = 1.0f / (fmax - fmin);
+      for (size_t i = 0; i < num_pixels; ++i)
+        facc_data[i] = (facc_data[i] - fmin) * inv_range;
+    }
+    else
+    {
+      std::fill(facc_data.begin(), facc_data.end(), 0.0f);
+    }
+
+    Logger::log()->trace(
+        "VulkanErosionPipeline: facc stats — mean={:.2f}, vmax={:.2f}, "
+        "range=[{:.2f}, {:.2f}]",
+        mean_facc, vmax, fmin, fmax);
+
+    // Upload remapped flow accumulation back to GPU
+    this->flow_acc_buf_->upload(facc_data.data(), buf_size);
+  }
+
+  // =========================================================
+  // Stage 3: GPU erosion apply
+  // flow_acc buffer now contains [0, 1] normalized values,
+  // so erosion = c_erosion * facc * mask — same scale as CPU.
+  // =========================================================
+  ctx.submit_and_wait(
+      [&](VkCommandBuffer cmd)
+      {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, this->pipeline_);
+        vkCmdBindDescriptorSets(cmd,
+                                VK_PIPELINE_BIND_POINT_COMPUTE,
+                                this->pipeline_layout_,
+                                0, 1, &this->descriptor_set_, 0, nullptr);
+
         pc.pass_type = 1;
         pc.iteration = num_iterations;
 
@@ -400,8 +481,6 @@ ErosionPerformanceMetrics VulkanErosionPipeline::compute_erosion(
   metrics.per_iteration_avg_ms =
       (num_iterations > 0) ? metrics.total_gpu_dispatch_ms / num_iterations : 0.0;
 
-  // Estimate barrier stall time as ~5% of total dispatch (reasonable heuristic
-  // when all work is recorded in a single command buffer)
   metrics.memory_barrier_stall_ms = metrics.total_gpu_dispatch_ms * 0.05;
 
   // Download results
