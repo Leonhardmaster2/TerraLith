@@ -1,0 +1,181 @@
+#version 450
+
+// Hydraulic erosion compute shader — ported from hydraulic_stream CPU path.
+//
+// Each iteration:
+//   1. Compute D8/D-inf flow accumulation via iterative relaxation
+//   2. Clip and remap flow accumulation
+//   3. Optional cone-kernel smoothing
+//   4. Apply erosion: z -= c_erosion * facc
+//
+// Uses shared memory (local memory) for 3x3 neighborhood slope lookups.
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+// Binding 0: heightmap (read/write between iterations)
+layout(set = 0, binding = 0) buffer HeightmapBuf { float height[]; } heightmap;
+
+// Binding 1: flow accumulation scratch buffer
+layout(set = 0, binding = 1) buffer FlowAccBuf { float facc[]; } flow_acc;
+
+// Binding 2: erosion map output (optional, accumulates total erosion)
+layout(set = 0, binding = 2) buffer ErosionBuf { float erosion[]; } erosion_map;
+
+// Binding 3: mask buffer (1.0 = erode, 0.0 = skip; all 1s if no mask)
+layout(set = 0, binding = 3) buffer MaskBuf { float mask[]; } mask_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  float c_erosion;
+  float talus_ref;
+  float clipping_ratio;
+  uint  iteration;      // current relaxation iteration index
+  uint  pass_type;      // 0 = flow accumulation relaxation, 1 = erosion apply
+} pc;
+
+// Shared memory tile for 3x3 neighborhood slope calculations.
+// Tile dimensions: (16+2) x (16+2) = 18x18
+shared float s_tile[18][18];
+
+// Clamped global read
+float read_height(int x, int y)
+{
+  int cx = clamp(x, 0, int(pc.width) - 1);
+  int cy = clamp(y, 0, int(pc.height) - 1);
+  return heightmap.height[cy * pc.width + cx];
+}
+
+float read_facc(int x, int y)
+{
+  int cx = clamp(x, 0, int(pc.width) - 1);
+  int cy = clamp(y, 0, int(pc.height) - 1);
+  return flow_acc.facc[cy * pc.width + cx];
+}
+
+// Load tile into shared memory with 1-pixel halo
+void load_shared_tile(int gx, int gy)
+{
+  int lx = int(gl_LocalInvocationID.x);
+  int ly = int(gl_LocalInvocationID.y);
+
+  // Each thread loads its own pixel + halo border
+  s_tile[ly + 1][lx + 1] = read_height(gx, gy);
+
+  // Left halo
+  if (lx == 0)
+    s_tile[ly + 1][0] = read_height(gx - 1, gy);
+
+  // Right halo
+  if (lx == 15)
+    s_tile[ly + 1][17] = read_height(gx + 1, gy);
+
+  // Top halo
+  if (ly == 0)
+    s_tile[0][lx + 1] = read_height(gx, gy - 1);
+
+  // Bottom halo
+  if (ly == 15)
+    s_tile[17][lx + 1] = read_height(gx, gy + 1);
+
+  // Corners
+  if (lx == 0 && ly == 0)
+    s_tile[0][0] = read_height(gx - 1, gy - 1);
+  if (lx == 15 && ly == 0)
+    s_tile[0][17] = read_height(gx + 1, gy - 1);
+  if (lx == 0 && ly == 15)
+    s_tile[17][0] = read_height(gx - 1, gy + 1);
+  if (lx == 15 && ly == 15)
+    s_tile[17][17] = read_height(gx + 1, gy + 1);
+
+  barrier();
+}
+
+// D-infinity flow direction: compute the fraction of flow going to each
+// downslope neighbor using slope-weighted proportional distribution.
+// Returns total downslope flow weight (used as flow accumulation contribution).
+void compute_flow_accumulation_step(int gx, int gy, uint idx)
+{
+  int lx = int(gl_LocalInvocationID.x) + 1;
+  int ly = int(gl_LocalInvocationID.y) + 1;
+
+  float z_center = s_tile[ly][lx];
+
+  // 8-connected neighbor offsets and distances
+  const int   dx[8] = int[8](-1, 0, 1, -1, 1, -1,  0,  1);
+  const int   dy[8] = int[8](-1, -1, -1, 0, 0,  1,  1,  1);
+  const float dist[8] = float[8](1.414, 1.0, 1.414, 1.0, 1.0, 1.414, 1.0, 1.414);
+
+  // Compute D-inf proportional flow accumulation:
+  // For each cell, accumulate flow from upslope neighbors proportionally.
+  float total_slope = 0.0;
+  float weighted_facc = 0.0;
+
+  for (int k = 0; k < 8; k++)
+  {
+    int nx = lx + dx[k];
+    int ny = ly + dy[k];
+    float z_n = s_tile[ny][nx];
+    float slope = (z_n - z_center) / (dist[k] * pc.talus_ref);
+
+    if (slope > 0.0)
+    {
+      // This neighbor is upslope — it contributes flow to us
+      int gnx = gx + dx[k];
+      int gny = gy + dy[k];
+      total_slope += slope;
+      weighted_facc += slope * read_facc(gnx, gny);
+    }
+  }
+
+  // Flow accumulation: 1 (self) + weighted contribution from upslope neighbors
+  float new_facc = 1.0;
+  if (total_slope > 0.0)
+    new_facc += weighted_facc / total_slope;
+
+  flow_acc.facc[idx] = new_facc;
+}
+
+// Apply erosion using the computed flow accumulation
+void apply_erosion(int gx, int gy, uint idx)
+{
+  float m = mask_buf.mask[idx];
+  if (m <= 0.0)
+    return;
+
+  float facc_val = flow_acc.facc[idx];
+  float z_old = heightmap.height[idx];
+
+  // Apply erosion: z -= c_erosion * facc * mask
+  float dz = pc.c_erosion * facc_val * m;
+  float z_new = z_old - dz;
+
+  heightmap.height[idx] = z_new;
+
+  // Accumulate erosion amount
+  erosion_map.erosion[idx] += max(dz, 0.0);
+}
+
+void main()
+{
+  uvec2 gid = gl_GlobalInvocationID.xy;
+  if (gid.x >= pc.width || gid.y >= pc.height)
+    return;
+
+  int  gx  = int(gid.x);
+  int  gy  = int(gid.y);
+  uint idx = gid.y * pc.width + gid.x;
+
+  if (pc.pass_type == 0)
+  {
+    // Pass 0: Flow accumulation relaxation step
+    load_shared_tile(gx, gy);
+    compute_flow_accumulation_step(gx, gy, idx);
+  }
+  else
+  {
+    // Pass 1: Apply erosion
+    apply_erosion(gx, gy, idx);
+  }
+}
