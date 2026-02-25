@@ -187,22 +187,18 @@ void NodeAttributesWidget::setup_connections()
                     ancestor = ancestor->parentWidget();
                   }
 
-                  auto gno = this->p_graph_node.lock();
-                  if (!gno)
-                    return;
-
-                  gno->update(this->node_id);
+                  // Route through GraphWorker so execution time and backend
+                  // badges are updated on the graph nodes.
+                  if (this->p_graph_node_widget)
+                    this->p_graph_node_widget->on_node_reload_request(this->node_id);
                 });
 
   this->connect(this->attributes_widget,
                 &attr::AttributesWidget::update_button_released,
                 [this]()
                 {
-                  auto gno = this->p_graph_node.lock();
-                  if (!gno)
-                    return;
-
-                  gno->update(this->node_id);
+                  if (this->p_graph_node_widget)
+                    this->p_graph_node_widget->on_node_reload_request(this->node_id);
                 });
 }
 

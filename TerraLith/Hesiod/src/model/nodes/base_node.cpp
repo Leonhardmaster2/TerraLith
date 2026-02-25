@@ -76,12 +76,14 @@ void BaseNode::compute()
   bool handled = false;
 
 #ifdef HESIOD_HAS_VULKAN
-  // Only attempt Vulkan if the per-node "use_gpu" toggle is enabled (default: true).
-  bool gpu_enabled = this->vulkan_enabled_;
-  if (this->attr.contains("use_gpu"))
-    gpu_enabled = this->get_attr<attr::BoolAttribute>("use_gpu");
+  // Determine whether to attempt the Vulkan path.  The per-node "GPU"
+  // attribute (set in the node-attributes panel) is the primary toggle; fall
+  // back to the vulkan_enabled_ flag for nodes that don't expose it.
+  bool gpu_requested = this->vulkan_enabled_;
+  if (this->attr.contains("GPU"))
+    gpu_requested = this->get_attr<attr::BoolAttribute>("GPU");
 
-  if (gpu_enabled && this->compute_vulkan_fct)
+  if (gpu_requested && this->compute_vulkan_fct)
   {
     try
     {
@@ -598,16 +600,6 @@ void BaseNode::set_compute_fct(std::function<void(BaseNode &node)> new_compute_f
 void BaseNode::set_compute_vulkan_fct(std::function<bool(BaseNode &node)> fct)
 {
   this->compute_vulkan_fct = std::move(fct);
-
-  // Auto-add a "use_gpu" toggle so the user can force CPU from the node properties.
-  // Only add it once; nodes that already have the attribute are left untouched.
-  if (!this->attr.contains("use_gpu"))
-  {
-    this->add_attr<attr::BoolAttribute>("use_gpu", "use_gpu", true);
-
-    // Append to ordered key list so it appears in the UI
-    this->attr_ordered_key.insert(this->attr_ordered_key.begin(), "use_gpu");
-  }
 }
 
 bool BaseNode::supports_vulkan_compute() const
