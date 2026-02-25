@@ -473,7 +473,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(Debug, debug);
     SETUP_NODE(ExportHeightmap, export_heightmap);
     SETUP_NODE(FloodingUniformLevel, flooding_uniform_level);
-    SETUP_NODE(GaborWaveFbm, gabor_wave_fbm);
+    SETUP_NODE_VULKAN(GaborWaveFbm, gabor_wave_fbm);
     SETUP_NODE_VULKAN(Gain, gain);
     SETUP_NODE(HydraulicStreamLog, hydraulic_stream_log);
     SETUP_NODE(Noise, noise);
