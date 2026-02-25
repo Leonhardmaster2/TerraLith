@@ -10,6 +10,11 @@
 #include "hesiod/model/nodes/base_node.hpp"
 #include "hesiod/model/nodes/post_process.hpp"
 
+#ifdef HESIOD_HAS_VULKAN
+#include "hesiod/gpu/vulkan/vulkan_buffer.hpp"
+#include "hesiod/gpu/vulkan/vulkan_generic_pipeline.hpp"
+#endif
+
 using namespace attr;
 
 namespace hesiod
@@ -70,5 +75,99 @@ void compute_smooth_cpulse_node(BaseNode &node)
     post_process_heightmap(node, *p_out, p_in);
   }
 }
+
+#ifdef HESIOD_HAS_VULKAN
+bool compute_smooth_cpulse_node_vulkan(BaseNode &node)
+{
+  hmap::Heightmap *p_in = node.get_value_ref<hmap::Heightmap>("input");
+  if (!p_in)
+    return false;
+
+  // Fall back to CPU when a mask is connected (masking requires per-pixel
+  // blending between original and blurred data that the separable GPU shaders
+  // do not handle).
+  hmap::Heightmap *p_mask = node.get_value_ref<hmap::Heightmap>("mask");
+  if (p_mask)
+    return false;
+
+  auto &gp = VulkanGenericPipeline::instance();
+  if (!gp.is_ready())
+    return false;
+
+  hmap::Heightmap *p_out = node.get_value_ref<hmap::Heightmap>("output");
+
+  float radius = node.get_attr<FloatAttribute>("radius");
+
+  // Cap GPU path at radius <= 32 pixels (shared memory limit in the shader).
+  int ir_check = std::max(1, (int)(radius * p_out->shape.x));
+  if (ir_check > 32)
+    return false;
+
+  // Copy input to output first (matching CPU path)
+  *p_out = *p_in;
+
+  // Push constants shared by both horizontal and vertical passes
+  struct
+  {
+    uint32_t width;
+    uint32_t height;
+    int32_t  radius;
+    float    sigma;
+  } pc{};
+
+  for (size_t i = 0; i < p_out->get_ntiles(); ++i)
+  {
+    auto &tile_out = p_out->tiles[i];
+
+    pc.width  = static_cast<uint32_t>(tile_out.shape.x);
+    pc.height = static_cast<uint32_t>(tile_out.shape.y);
+    pc.radius = std::max(1, (int)(radius * tile_out.shape.x));
+    // Sigma chosen so that the Gaussian covers the kernel radius well
+    pc.sigma  = static_cast<float>(pc.radius) / 3.0f;
+    if (pc.sigma < 0.5f)
+      pc.sigma = 0.5f;
+
+    VkDeviceSize buf_size = static_cast<VkDeviceSize>(pc.width) * pc.height * sizeof(float);
+
+    // Ping-pong buffers: input -> temp (H-blur) -> output (V-blur)
+    VulkanBuffer input_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                           VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                               VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    input_buf.upload(tile_out.vector.data(), buf_size);
+
+    VulkanBuffer temp_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                          VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT |
+                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    VulkanBuffer output_buf(buf_size, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+    // Pass 1: Horizontal blur — input_buf -> temp_buf
+    {
+      std::vector<VulkanBuffer *> buffers = {&input_buf, &temp_buf};
+      gp.dispatch("blur_horizontal", &pc, sizeof(pc), buffers,
+                  (pc.width + 255) / 256, pc.height);
+    }
+
+    // Pass 2: Vertical blur — temp_buf -> output_buf
+    {
+      std::vector<VulkanBuffer *> buffers = {&temp_buf, &output_buf};
+      gp.dispatch("blur_vertical", &pc, sizeof(pc), buffers,
+                  pc.width, (pc.height + 255) / 256);
+    }
+
+    output_buf.download(tile_out.vector.data(), buf_size);
+  }
+
+  p_out->smooth_overlap_buffers();
+
+  // post-process
+  post_process_heightmap(node, *p_out, p_in);
+
+  return true;
+}
+#endif
 
 } // namespace hesiod

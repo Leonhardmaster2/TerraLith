@@ -1,0 +1,80 @@
+#version 450
+
+// Separable Gaussian Blur — Horizontal Pass
+//
+// Reads from input buffer, writes horizontally blurred result to output buffer.
+// Configurable kernel radius via push constants (supports up to 32-tap radius).
+// Uses precomputed Gaussian weights in shared memory for efficiency.
+
+layout(local_size_x = 256, local_size_y = 1) in;
+
+layout(set = 0, binding = 0) buffer InputBuf  { float data[]; } input_buf;
+layout(set = 0, binding = 1) buffer OutputBuf { float data[]; } output_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  int   radius;    // kernel half-size (total tap count = 2*radius + 1)
+  float sigma;     // Gaussian standard deviation
+} pc;
+
+// Shared memory tile: each workgroup row loads (256 + 2*radius) samples.
+// Max radius = 32, so max shared size = 256 + 64 = 320.
+shared float s_row[320];
+
+void main()
+{
+  uint gx = gl_GlobalInvocationID.x;
+  uint gy = gl_GlobalInvocationID.y;
+
+  if (gy >= pc.height)
+    return;
+
+  int lx = int(gl_LocalInvocationID.x);
+  int r  = pc.radius;
+
+  // Tile origin in global coords (leftmost pixel this workgroup covers)
+  int tile_origin = int(gl_WorkGroupID.x) * 256;
+
+  // Load center pixel into shared memory
+  int gx_center = tile_origin + lx;
+  s_row[lx + r] = (gx_center >= 0 && gx_center < int(pc.width))
+                       ? input_buf.data[gy * pc.width + uint(gx_center)]
+                       : input_buf.data[gy * pc.width + uint(clamp(gx_center, 0, int(pc.width) - 1))];
+
+  // Load left halo
+  if (lx < r)
+  {
+    int hx = tile_origin + lx - r;
+    hx = clamp(hx, 0, int(pc.width) - 1);
+    s_row[lx] = input_buf.data[gy * pc.width + uint(hx)];
+  }
+
+  // Load right halo
+  if (lx >= 256 - r)
+  {
+    int hx = tile_origin + lx + r;
+    hx = clamp(hx, 0, int(pc.width) - 1);
+    s_row[lx + 2 * r] = input_buf.data[gy * pc.width + uint(hx)];
+  }
+
+  barrier();
+
+  if (gx >= pc.width)
+    return;
+
+  // Compute Gaussian-weighted sum
+  float sum = 0.0;
+  float weight_sum = 0.0;
+  float inv_2sigma2 = 1.0 / (2.0 * pc.sigma * pc.sigma);
+
+  for (int k = -r; k <= r; k++)
+  {
+    float w = exp(-float(k * k) * inv_2sigma2);
+    sum += w * s_row[lx + r + k];
+    weight_sum += w;
+  }
+
+  output_buf.data[gy * pc.width + gx] = sum / weight_sum;
+}

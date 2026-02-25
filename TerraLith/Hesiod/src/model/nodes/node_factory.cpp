@@ -568,8 +568,8 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(GaussianPulse, gaussian_pulse);
     SETUP_NODE(Gavoronoise, gavoronoise);
     SETUP_NODE(Gradient, gradient);
-    SETUP_NODE(GradientAngle, gradient_angle);
-    SETUP_NODE(GradientNorm, gradient_norm);
+    SETUP_NODE_VULKAN(GradientAngle, gradient_angle);
+    SETUP_NODE_VULKAN(GradientNorm, gradient_norm);
     SETUP_NODE(GradientTalus, gradient_talus);
     SETUP_NODE(HeightmapToKernel, heightmap_to_kernel);
     SETUP_NODE(HeightmapToMask, heightmap_to_mask);
@@ -702,7 +702,7 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE_VULKAN(ShiftElevation, shift_elevation);
     SETUP_NODE(Skeleton, skeleton);
     SETUP_NODE(Slope, slope);
-    SETUP_NODE(SmoothCpulse, smooth_cpulse);
+    SETUP_NODE_VULKAN(SmoothCpulse, smooth_cpulse);
     SETUP_NODE(SmoothFill, smooth_fill);
     SETUP_NODE(SmoothFillHoles, smooth_fill_holes);
     SETUP_NODE(SmoothFillSmearPeaks, smooth_fill_smear_peaks);

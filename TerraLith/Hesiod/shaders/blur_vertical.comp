@@ -1,0 +1,79 @@
+#version 450
+
+// Separable Gaussian Blur — Vertical Pass
+//
+// Reads from the temp buffer (output of horizontal pass), writes the final
+// blurred result. Configurable kernel radius via push constants.
+// Uses shared memory column tile for coalesced access.
+
+layout(local_size_x = 1, local_size_y = 256) in;
+
+layout(set = 0, binding = 0) buffer InputBuf  { float data[]; } input_buf;
+layout(set = 0, binding = 1) buffer OutputBuf { float data[]; } output_buf;
+
+layout(push_constant) uniform PushConstants
+{
+  uint  width;
+  uint  height;
+  int   radius;    // kernel half-size
+  float sigma;     // Gaussian standard deviation
+} pc;
+
+// Shared memory tile: each workgroup column loads (256 + 2*radius) samples.
+shared float s_col[320];
+
+void main()
+{
+  uint gx = gl_GlobalInvocationID.x;
+  uint gy = gl_GlobalInvocationID.y;
+
+  if (gx >= pc.width)
+    return;
+
+  int ly = int(gl_LocalInvocationID.y);
+  int r  = pc.radius;
+
+  // Tile origin in global coords (topmost pixel this workgroup covers)
+  int tile_origin = int(gl_WorkGroupID.y) * 256;
+
+  // Load center pixel into shared memory
+  int gy_center = tile_origin + ly;
+  s_col[ly + r] = (gy_center >= 0 && gy_center < int(pc.height))
+                       ? input_buf.data[uint(gy_center) * pc.width + gx]
+                       : input_buf.data[uint(clamp(gy_center, 0, int(pc.height) - 1)) * pc.width + gx];
+
+  // Load top halo
+  if (ly < r)
+  {
+    int hy = tile_origin + ly - r;
+    hy = clamp(hy, 0, int(pc.height) - 1);
+    s_col[ly] = input_buf.data[uint(hy) * pc.width + gx];
+  }
+
+  // Load bottom halo
+  if (ly >= 256 - r)
+  {
+    int hy = tile_origin + ly + r;
+    hy = clamp(hy, 0, int(pc.height) - 1);
+    s_col[ly + 2 * r] = input_buf.data[uint(hy) * pc.width + gx];
+  }
+
+  barrier();
+
+  if (gy >= pc.height)
+    return;
+
+  // Compute Gaussian-weighted sum
+  float sum = 0.0;
+  float weight_sum = 0.0;
+  float inv_2sigma2 = 1.0 / (2.0 * pc.sigma * pc.sigma);
+
+  for (int k = -r; k <= r; k++)
+  {
+    float w = exp(-float(k * k) * inv_2sigma2);
+    sum += w * s_col[ly + r + k];
+    weight_sum += w;
+  }
+
+  output_buf.data[gy * pc.width + gx] = sum / weight_sum;
+}
