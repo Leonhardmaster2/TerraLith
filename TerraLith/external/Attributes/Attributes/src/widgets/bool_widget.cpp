@@ -1,6 +1,7 @@
 /* Copyright (c) 2024 Otto Link. Distributed under the terms of the GNU General
  * Public License. The full license is in the file LICENSE, distributed with
  * this software. */
+#include <QCheckBox>
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -19,20 +20,19 @@ BoolWidget::BoolWidget(BoolAttribute *p_attr) : p_attr(p_attr)
 
   if (this->p_attr->get_label_true() == "")
   {
-    // --- basic toggle button on/off
+    // --- checkbox toggle on/off
 
-    this->button = new QPushButton(this->p_attr->get_label().c_str(), this);
-    this->button->setCheckable(true);
-    this->button->setChecked(p_attr->get_value());
+    this->checkbox = new QCheckBox(this->p_attr->get_label().c_str(), this);
+    this->checkbox->setChecked(p_attr->get_value());
 
-    this->connect(this->button,
-                  &QPushButton::toggled,
+    this->connect(this->checkbox,
+                  &QCheckBox::toggled,
                   this,
                   [this](bool checked) { this->update_attribute_from_widget(checked); });
 
     QHBoxLayout *layout = new QHBoxLayout(this);
     setup_default_layout_spacing(layout);
-    layout->addWidget(this->button);
+    layout->addWidget(this->checkbox);
     this->setLayout(layout);
   }
   else
@@ -111,7 +111,7 @@ void BoolWidget::reset_value(bool reset_to_initial_state)
 
   if (this->p_attr->get_label_true() == "")
   {
-    this->button->setChecked(p_attr->get_value());
+    this->checkbox->setChecked(p_attr->get_value());
   }
   else
   {

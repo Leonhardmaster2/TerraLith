@@ -8,6 +8,8 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 
+#include "attributes.hpp"
+
 #include "hesiod/app/hesiod_application.hpp"
 #include "hesiod/gui/widgets/gui_utils.hpp"
 #include "hesiod/gui/widgets/icon_check_box.hpp"
@@ -373,7 +375,12 @@ void NodeSettingsWidget::update_content()
     if (p_node->supports_vulkan_compute())
     {
       auto *gpu_checkbox = new QCheckBox("Enable GPU Compute");
-      gpu_checkbox->setChecked(p_node->is_vulkan_enabled());
+      // Read from the per-node "GPU" attribute when present (primary toggle);
+      // fall back to vulkan_enabled_ for nodes that don't have one.
+      bool gpu_on = p_node->is_vulkan_enabled();
+      if (p_node->get_attributes_ref()->count("GPU"))
+        gpu_on = p_node->get_attr<attr::BoolAttribute>("GPU");
+      gpu_checkbox->setChecked(gpu_on);
       gpu_checkbox->setToolTip(
           "When enabled, this node uses Vulkan GPU acceleration.\n"
           "Disable to force CPU computation.");

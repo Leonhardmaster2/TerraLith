@@ -12,6 +12,7 @@
  */
 
 #pragma once
+#include <QCheckBox>
 #include <QPushButton>
 
 #include "attributes/bool_attribute.hpp"
@@ -36,7 +37,8 @@ private:
   void update_attribute_from_widget(const bool new_value);
 
   BoolAttribute *p_attr;
-  QPushButton   *button, *button_true, *button_false;
+  QCheckBox     *checkbox = nullptr;
+  QPushButton   *button_true = nullptr, *button_false = nullptr;
 };
 
 } // namespace attr
