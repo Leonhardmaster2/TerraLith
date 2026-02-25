@@ -310,7 +310,8 @@ void GraphicsNode::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
   QGraphicsItem::mouseMoveEvent(event);
 
   // Auto-wire highlight: show which link the node would be inserted into
-  if (this->is_node_dragged && this->node_dropped_on_link && this->scene())
+  if (this->is_node_dragged && this->node_dropped_on_link && this->scene() &&
+      this->all_connected_links.empty())
   {
     GraphicsLink *best_link = nullptr;
 
@@ -344,6 +345,60 @@ void GraphicsNode::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
   if (event->button() == Qt::LeftButton)
   {
+    // Alt+click on a connected port: disconnect the link
+    if (event->modifiers() & Qt::AltModifier)
+    {
+      int hovered_port_index = this->get_hovered_port_index();
+      if (hovered_port_index >= 0 && this->connected_link_ref[hovered_port_index])
+      {
+        if (this->disconnect_link)
+          this->disconnect_link(this->connected_link_ref[hovered_port_index]);
+        event->accept();
+        QGraphicsRectItem::mousePressEvent(event);
+        return;
+      }
+    }
+
+    // Ctrl+click on a connected port: start reroute
+    if (event->modifiers() & Qt::ControlModifier)
+    {
+      int hovered_port_index = this->get_hovered_port_index();
+      if (hovered_port_index >= 0 && this->connected_link_ref[hovered_port_index])
+      {
+        GraphicsLink *link = this->connected_link_ref[hovered_port_index];
+
+        // Determine anchor (the OTHER end of the link)
+        GraphicsNode *anchor_node;
+        int           anchor_port;
+        if (link->get_node_out() == this)
+        {
+          anchor_node = link->get_node_in();
+          anchor_port = link->get_port_in_index();
+        }
+        else
+        {
+          anchor_node = link->get_node_out();
+          anchor_port = link->get_port_out_index();
+        }
+
+        // Fire callback: deletes old link + creates temp_link from anchor
+        if (this->reroute_started)
+          this->reroute_started(anchor_node, anchor_port, link);
+
+        // Set up local reroute drag state
+        this->is_rerouting = true;
+        this->reroute_anchor_node = anchor_node;
+        this->reroute_anchor_port = anchor_port;
+        this->setFlag(QGraphicsItem::ItemIsMovable, false);
+        this->data_type_connecting = anchor_node->get_data_type(anchor_port);
+        this->port_type_connecting = anchor_node->get_port_type(anchor_port);
+
+        event->accept();
+        QGraphicsRectItem::mousePressEvent(event);
+        return;
+      }
+    }
+
     int hovered_port_index = this->get_hovered_port_index();
 
     if (hovered_port_index >= 0)
@@ -382,6 +437,61 @@ void GraphicsNode::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
   if (event->button() == Qt::LeftButton)
   {
+    // Reroute completion
+    if (this->is_rerouting)
+    {
+      this->is_rerouting = false;
+      bool is_dropped = true;
+
+      QList<QGraphicsItem *> items_under_mouse = scene()->items(event->scenePos());
+      for (QGraphicsItem *item : items_under_mouse)
+      {
+        if (GraphicsNode *p_target = dynamic_cast<GraphicsNode *>(item))
+        {
+          int target_port = p_target->get_hovered_port_index();
+          if (target_port >= 0 && p_target != this &&
+              p_target != this->reroute_anchor_node)
+          {
+            if (this->connection_finished)
+              this->connection_finished(this->reroute_anchor_node,
+                                        this->reroute_anchor_port,
+                                        p_target,
+                                        target_port);
+            is_dropped = false;
+            break;
+          }
+          else
+          {
+            break; // found a node but no valid port
+          }
+        }
+      }
+
+      if (is_dropped && this->connection_dropped)
+        this->connection_dropped(this->reroute_anchor_node,
+                                 this->reroute_anchor_port,
+                                 event->scenePos());
+
+      // Clean up state
+      this->reroute_anchor_node = nullptr;
+      this->reroute_anchor_port = -1;
+      this->setFlag(QGraphicsItem::ItemIsMovable, true);
+
+      // Reset port color highlighting on all nodes
+      for (QGraphicsItem *item : this->scene()->items())
+      {
+        if (GraphicsNode *node = dynamic_cast<GraphicsNode *>(item))
+        {
+          node->data_type_connecting = "";
+          node->port_type_connecting = PortType::OUT;
+          node->update();
+        }
+      }
+
+      QGraphicsRectItem::mouseReleaseEvent(event);
+      return;
+    }
+
     if (this->is_node_dragged)
     {
       this->is_node_dragged = false;
@@ -394,7 +504,8 @@ void GraphicsNode::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
       }
 
       // Check for auto-wiring: was node dropped on a link?
-      if (this->node_dropped_on_link && this->scene())
+      if (this->node_dropped_on_link && this->scene() &&
+          this->all_connected_links.empty())
       {
         for (QGraphicsItem *item : this->collidingItems(Qt::IntersectsItemShape))
         {

@@ -49,7 +49,10 @@ void setup_gabor_wave_fbm_node(BaseNode &node)
   node.add_attr<FloatAttribute>("weight", "Weight", 0.7f, 0.f, 1.f);
   node.add_attr<FloatAttribute>("persistence", "Persistence", 0.5f, 0.f, 1.f);
   node.add_attr<FloatAttribute>("lacunarity", "Lacunarity", 2.f, 0.01f, 4.f);
-  node.add_attr<BoolAttribute>("GPU", "GPU", HSD_DEFAULT_GPU_MODE);
+
+  // NOTE: Vulkan GPU toggle is provided by node_settings_widget ("Enable GPU
+  // Compute" checkbox) for all DECLARE_NODE_VULKAN nodes — no manual "GPU"
+  // attribute needed here.
 
   // attribute(s) order
   node.set_attr_ordered_key({"_GROUPBOX_BEGIN_Main Parameters",
@@ -64,8 +67,7 @@ void setup_gabor_wave_fbm_node(BaseNode &node)
                              "weight",
                              "persistence",
                              "lacunarity",
-                             "_GROUPBOX_END_",
-                             "GPU"});
+                             "_GROUPBOX_END_"});
 
   setup_post_process_heightmap_attributes(node);
 }
@@ -149,9 +151,8 @@ static_assert(sizeof(GaborWaveFbmPushConstants) == 68,
 
 bool compute_gabor_wave_fbm_node_vulkan(BaseNode &node)
 {
-  // Only engage Vulkan if user toggled GPU on
-  if (!node.get_attr<BoolAttribute>("GPU"))
-    return false;
+  // Note: the caller (BaseNode::compute) already checks vulkan_enabled_
+  // before invoking this function, so no manual GPU toggle check needed.
 
   // Check Vulkan availability
   auto &vk_ctx = VulkanContext::instance();

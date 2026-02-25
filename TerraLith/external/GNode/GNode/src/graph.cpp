@@ -178,6 +178,18 @@ bool Graph::new_link(const std::string &from,
   if (to_node_it == this->nodes.end())
     throw std::runtime_error("Destination node not found: " + to);
 
+  // Enforce single-input: remove any existing link(s) to the same input port.
+  // Input ports hold a single weak_ptr, so only the last connection's data is
+  // used. Remove stale links to keep the model consistent and prevent
+  // duplicate graph updates.
+  {
+    auto it = std::remove_if(this->links.begin(),
+                             this->links.end(),
+                             [&to, port_to](const Link &existing)
+                             { return existing.to == to && existing.port_to == port_to; });
+    this->links.erase(it, this->links.end());
+  }
+
   std::shared_ptr<BaseData> from_data = from_node_it->second->get_output_data(
       port_from);
 

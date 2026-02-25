@@ -254,6 +254,18 @@ std::string GraphViewer::add_node(NodeProxy         *p_node_proxy,
     }
   };
 
+  // Alt+click: disconnect a link
+  p_node->disconnect_link = [this](GraphicsLink *link)
+  { this->delete_graphics_link(link); };
+
+  // Ctrl+drag: reroute a connection — delete old link, start drag from anchor
+  p_node->reroute_started =
+      [this](GraphicsNode *anchor_node, int anchor_port, GraphicsLink *link)
+  {
+    this->delete_graphics_link(link);
+    this->on_connection_started(anchor_node, anchor_port);
+  };
+
   // if nothing provided, generate a unique id based on the object address
   std::string nid = node_id.empty() ? std::to_string(reinterpret_cast<uintptr_t>(p_node))
                                     : node_id;
@@ -1063,12 +1075,21 @@ void GraphViewer::mouseMoveEvent(QMouseEvent *event)
   }
 
   // temporary link follows the mouse
-  if (this->temp_link)
+  if (this->temp_link && this->source_node)
   {
-    // Update the end of the temporary cubic spline to follow the mouse
-    QPointF end_pos = this->mapToScene(event->pos());
-    this->temp_link->set_endpoints(this->temp_link->path().pointAtPercent(0), end_pos);
-    this->temp_link->update_path();
+    QPointF mouse_pos = this->mapToScene(event->pos());
+    QPointF port_pos = this->source_node->scenePos() +
+                       this->source_node->get_geometry()
+                           .port_rects[this->source_port_index_]
+                           .center();
+
+    // When dragging FROM an input port the curve should leave to the left
+    // (toward outputs). Swap start/end so the cubic control points curve
+    // in the correct direction.
+    if (this->source_node->get_port_type(this->source_port_index_) == PortType::IN)
+      this->temp_link->set_endpoints(mouse_pos, port_pos);
+    else
+      this->temp_link->set_endpoints(port_pos, mouse_pos);
   }
 
   QGraphicsView::mouseMoveEvent(event);
@@ -1309,6 +1330,7 @@ void GraphViewer::on_connection_finished(GraphicsNode *from_node,
 void GraphViewer::on_connection_started(GraphicsNode *from_node, int port_index)
 {
   this->source_node = from_node;
+  this->source_port_index_ = port_index;
 
   QColor color = get_color_from_data_type(from_node->get_data_type(port_index));
   this->temp_link = new GraphicsLink(color, this->current_link_type);

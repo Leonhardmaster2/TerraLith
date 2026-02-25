@@ -44,7 +44,10 @@ void setup_noise_fbm_node(BaseNode &node)
   node.add_attr<FloatAttribute>("weight", "Weight", 0.7f, 0.f, 1.f);
   node.add_attr<FloatAttribute>("persistence", "Persistence", 0.5f, 0.f, 1.f);
   node.add_attr<FloatAttribute>("lacunarity", "Lacunarity", 2.f, 0.01f, 4.f);
-  node.add_attr<BoolAttribute>("GPU", "GPU", HSD_DEFAULT_GPU_MODE);
+
+  // NOTE: Vulkan GPU toggle is provided by node_settings_widget ("Enable GPU
+  // Compute" checkbox) for all DECLARE_NODE_VULKAN nodes — no manual "GPU"
+  // attribute needed here.
 
   // attribute(s) order
   node.set_attr_ordered_key({"noise_type",
@@ -53,8 +56,7 @@ void setup_noise_fbm_node(BaseNode &node)
                              "octaves",
                              "weight",
                              "persistence",
-                             "lacunarity",
-                             "GPU"});
+                             "lacunarity"});
 
   setup_post_process_heightmap_attributes(node);
 }
@@ -70,7 +72,9 @@ void compute_noise_fbm_node(BaseNode &node)
   hmap::Heightmap *p_env = node.get_value_ref<hmap::Heightmap>("envelope");
   hmap::Heightmap *p_out = node.get_value_ref<hmap::Heightmap>("output");
 
-  if (node.get_attr<BoolAttribute>("GPU"))
+  // When GPU compute is enabled (and Vulkan failed, falling back here),
+  // try OpenCL; otherwise use pure CPU.
+  if (node.is_vulkan_enabled())
   {
     hmap::transform(
         {p_out, p_ctrl, p_dx, p_dy},
@@ -139,9 +143,8 @@ void compute_noise_fbm_node(BaseNode &node)
 #ifdef HESIOD_HAS_VULKAN
 bool compute_noise_fbm_node_vulkan(BaseNode &node)
 {
-  // Only engage Vulkan if user toggled GPU on
-  if (!node.get_attr<BoolAttribute>("GPU"))
-    return false;
+  // Note: the caller (BaseNode::compute) already checks vulkan_enabled_
+  // before invoking this function, so no manual GPU toggle check needed.
 
   // Check Vulkan availability
   auto &vk_ctx = VulkanContext::instance();

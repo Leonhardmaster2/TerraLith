@@ -206,6 +206,7 @@ private:
 
   GraphicsLink *temp_link = nullptr;   // Temporary link
   GraphicsNode *source_node = nullptr; // Source node for the connection
+  int           source_port_index_ = -1; // Port index on source_node for temp_link
   LinkType      current_link_type = LinkType::CUBIC;
 
   // Middle-mouse panning state

@@ -99,6 +99,13 @@ public:
   std::function<void(GraphicsNode *dropped_node, GraphicsLink *target_link)>
       node_dropped_on_link;
 
+  // Alt+click: disconnect the link on a connected port
+  std::function<void(GraphicsLink *link)> disconnect_link;
+
+  // Ctrl+drag: start rerouting a connection from the anchor (other) end
+  std::function<void(GraphicsNode *anchor_node, int anchor_port, GraphicsLink *link)>
+      reroute_started;
+
 protected:
   // --- Qt methods override
 
@@ -144,6 +151,9 @@ private:
   std::string                 data_type_connecting = "";
   PortType                    port_type_connecting = PortType::OUT;
   GraphicsLink               *highlighted_drop_link = nullptr; // for auto-wire preview
+  bool                        is_rerouting = false;
+  GraphicsNode               *reroute_anchor_node = nullptr;
+  int                         reroute_anchor_port = -1;
   QGraphicsProxyWidget       *proxy_widget = nullptr; // owned by this
 
   // Execution feedback (set by application layer, rendered in paint)

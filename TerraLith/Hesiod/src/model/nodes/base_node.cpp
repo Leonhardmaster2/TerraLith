@@ -76,14 +76,10 @@ void BaseNode::compute()
   bool handled = false;
 
 #ifdef HESIOD_HAS_VULKAN
-  // Determine whether to attempt the Vulkan path.  The per-node "GPU"
-  // attribute (set in the node-attributes panel) is the primary toggle; fall
-  // back to the vulkan_enabled_ flag for nodes that don't expose it.
-  bool gpu_requested = this->vulkan_enabled_;
-  if (this->attr.contains("GPU"))
-    gpu_requested = this->get_attr<attr::BoolAttribute>("GPU");
-
-  if (gpu_requested && this->compute_vulkan_fct)
+  // Determine whether to attempt the Vulkan path.  Controlled by the
+  // "Enable GPU Compute" checkbox in the node settings widget, which
+  // sets vulkan_enabled_ via set_vulkan_enabled().
+  if (this->vulkan_enabled_ && this->compute_vulkan_fct)
   {
     try
     {

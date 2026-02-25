@@ -1,13 +1,16 @@
 #version 450
 
-// Hydraulic erosion compute shader — ported from hydraulic_stream CPU path.
+// Hydraulic erosion compute shader — faithful port of CPU hydraulic_stream.
 //
-// Each iteration:
-//   1. Compute D8/D-inf flow accumulation via iterative relaxation
-//   2. Clip flow accumulation using clipping_ratio to prevent runaway values
-//   3. Apply erosion: z -= c_erosion * clipped_facc * mask
+// Two pass types:
+//   Pass 0: D-infinity flow accumulation (iterative relaxation)
+//           Each cell receives proportional flow from upslope neighbors,
+//           matching the CPU's D-inf MFD algorithm (Qin et al. 2007).
+//   Pass 1: Apply erosion: z -= c_erosion * remapped_facc * mask
 //
-// Uses shared memory (local memory) for 3x3 neighborhood slope lookups.
+// The CPU uses a topological-sort single-pass; this GPU version uses
+// iterative Jacobi relaxation over max(w,h) dispatches, with a memory
+// barrier between each dispatch ensuring convergence.
 
 layout(local_size_x = 16, local_size_y = 16) in;
 
@@ -37,9 +40,19 @@ layout(push_constant) uniform PushConstants
 // Small epsilon to prevent division by zero
 const float EPSILON = 1.0e-5;
 
-// Shared memory tile for 3x3 neighborhood slope calculations.
-// Tile dimensions: (16+2) x (16+2) = 18x18
-shared float s_tile[18][18];
+// 8-connected neighbor layout (matches CPU code):
+//   5 1 7
+//   0 . 3
+//   4 2 6
+const int dx[8] = int[8](-1, 0, 0, 1, -1, -1, 1, 1);
+const int dy[8] = int[8](0, 1, -1, 0, -1, 1, -1, 1);
+
+// Distance: 1.0 for cardinal, sqrt(2) for diagonal
+const float dist[8] = float[8](1.0, 1.0, 1.0, 1.0, 1.414, 1.414, 1.414, 1.414);
+
+// Effective contour length (Quinn et al. 1991):
+// 0.5 for cardinal, 0.354 for diagonal
+const float ecl[8] = float[8](0.5, 0.5, 0.5, 0.5, 0.354, 0.354, 0.354, 0.354);
 
 // Clamped global read — guarantees in-bounds access
 float read_height(int x, int y)
@@ -56,118 +69,105 @@ float read_facc(int x, int y)
   return flow_acc.facc[cy * pc.width + cx];
 }
 
-// Load tile into shared memory with 1-pixel halo
-void load_shared_tile(int gx, int gy)
-{
-  int lx = int(gl_LocalInvocationID.x);
-  int ly = int(gl_LocalInvocationID.y);
-
-  // Each thread loads its own pixel + halo border
-  s_tile[ly + 1][lx + 1] = read_height(gx, gy);
-
-  // Left halo
-  if (lx == 0)
-    s_tile[ly + 1][0] = read_height(gx - 1, gy);
-
-  // Right halo
-  if (lx == 15)
-    s_tile[ly + 1][17] = read_height(gx + 1, gy);
-
-  // Top halo
-  if (ly == 0)
-    s_tile[0][lx + 1] = read_height(gx, gy - 1);
-
-  // Bottom halo
-  if (ly == 15)
-    s_tile[17][lx + 1] = read_height(gx, gy + 1);
-
-  // Corners
-  if (lx == 0 && ly == 0)
-    s_tile[0][0] = read_height(gx - 1, gy - 1);
-  if (lx == 15 && ly == 0)
-    s_tile[0][17] = read_height(gx + 1, gy - 1);
-  if (lx == 0 && ly == 15)
-    s_tile[17][0] = read_height(gx - 1, gy + 1);
-  if (lx == 15 && ly == 15)
-    s_tile[17][17] = read_height(gx + 1, gy + 1);
-
-  barrier();
-}
-
-// D-infinity flow direction: compute the fraction of flow going to each
-// downslope neighbor using slope-weighted proportional distribution.
-// Returns total downslope flow weight (used as flow accumulation contribution).
+// D-infinity flow accumulation step (pull-based).
+//
+// For each cell, compute incoming flow from all upslope neighbors using
+// proper D-inf proportional distribution:
+//
+//   For each upslope neighbor N at direction k:
+//     1. Compute gradient_talus at N (max slope to any of N's neighbors)
+//     2. Compute flow-partition exponent: p = 10 * clamp(talus/talus_ref, 0, 1) + 1
+//     3. Compute D-inf weight from N to us:   w_me = pow(slope_N_to_us, p) * ecl[k]
+//     4. Compute D-inf weight from N to ALL:  w_total = sum over downslope of pow(slope, p) * ecl
+//     5. Fraction of N's flow going to us:    f = w_me / w_total
+//     6. Accumulate:  incoming += f * facc[N]
+//
+//   facc[cell] = 1.0 + incoming
+//
+// This matches the CPU's flow_accumulation_dinf() + flow_direction_dinf().
 void compute_flow_accumulation_step(int gx, int gy, uint idx)
 {
-  int lx = int(gl_LocalInvocationID.x) + 1;
-  int ly = int(gl_LocalInvocationID.y) + 1;
-
-  float z_center = s_tile[ly][lx];
-
-  // 8-connected neighbor offsets and distances
-  const int   dx[8] = int[8](-1, 0, 1, -1, 1, -1,  0,  1);
-  const int   dy[8] = int[8](-1, -1, -1, 0, 0,  1,  1,  1);
-  const float dist[8] = float[8](1.414, 1.0, 1.414, 1.0, 1.0, 1.414, 1.0, 1.414);
-
-  // Safeguard: if talus_ref is degenerate, skip accumulation
+  float z_center = read_height(gx, gy);
   float safe_talus = max(pc.talus_ref, EPSILON);
 
-  // Compute D-inf proportional flow accumulation:
-  // For each cell, accumulate flow from upslope neighbors proportionally.
-  float total_slope = 0.0;
-  float weighted_facc = 0.0;
+  float incoming_flow = 0.0;
 
   for (int k = 0; k < 8; k++)
   {
-    int nx = lx + dx[k];
-    int ny = ly + dy[k];
+    int nx = gx + dx[k];
+    int ny = gy + dy[k];
+    float z_n = read_height(nx, ny);
 
-    // Bounds-check shared tile access (should always be 0..17 but be safe)
-    nx = clamp(nx, 0, 17);
-    ny = clamp(ny, 0, 17);
+    // Only consider upslope neighbors (z_n > z_center)
+    if (z_n <= z_center)
+      continue;
 
-    float z_n = s_tile[ny][nx];
-    float slope = (z_n - z_center) / (dist[k] * safe_talus);
+    // --- Compute D-inf fraction of neighbor's flow going to us ---
 
-    if (slope > 0.0)
+    // Step 1: Compute gradient_talus at neighbor (max downslope to any neighbor).
+    // This determines the flow-partition exponent p (Qin et al. 2007).
+    float max_slope_n = 0.0;
+    for (int j = 0; j < 8; j++)
     {
-      // This neighbor is upslope — it contributes flow to us
-      int gnx = gx + dx[k];
-      int gny = gy + dy[k];
-      total_slope += slope;
-      weighted_facc += slope * read_facc(gnx, gny);
+      float z_j = read_height(nx + dx[j], ny + dy[j]);
+      float slope_j = (z_n - z_j) / dist[j];
+      max_slope_n = max(max_slope_n, slope_j);
+    }
+
+    // Step 2: Flow-partition exponent — matches CPU:
+    //   talus = gradient_talus(z) / talus_ref;  clamp_max(talus, 1);
+    //   p = 10 * talus + 1;
+    // Higher p concentrates flow into steepest direction (1 = diffuse, 11 = sharp)
+    float talus_ratio = clamp(max_slope_n / safe_talus, 0.0, 1.0);
+    float p_exp = 10.0 * talus_ratio + 1.0;
+
+    // Step 3: Weight from neighbor to us — the slope from N down to us
+    float slope_to_me = (z_n - z_center) / dist[k];
+    float weight_to_me = pow(slope_to_me, p_exp) * ecl[k];
+
+    // Step 4: Total D-inf weight from neighbor to ALL its downslope cells
+    // This includes the weight to us (when j corresponds to direction back to us)
+    float total_weight = 0.0;
+    for (int j = 0; j < 8; j++)
+    {
+      float z_j = read_height(nx + dx[j], ny + dy[j]);
+      float dz = z_n - z_j;
+      if (dz > 0.0)
+      {
+        float slope = dz / dist[j];
+        total_weight += pow(slope, p_exp) * ecl[j];
+      }
+    }
+
+    // Step 5-6: Fraction of neighbor's flow to us, accumulated
+    if (total_weight > EPSILON)
+    {
+      float fraction = weight_to_me / total_weight;
+      incoming_flow += fraction * read_facc(nx, ny);
     }
   }
 
-  // Flow accumulation: 1 (self) + weighted contribution from upslope neighbors
-  // Use epsilon-safe denominator to prevent division by zero
-  float new_facc = 1.0;
-  if (total_slope > EPSILON)
-    new_facc += weighted_facc / total_slope;
-
-  // Do NOT clip per-iteration.  The CPU path computes full D-inf flow
-  // accumulation without any per-step cap, then clips ONCE at the end.
-  // Per-iteration clipping prevents realistic flow accumulation, capping
-  // values at clipping_ratio (e.g. 10) when they should reach hundreds.
-  // The CPU-side remap stage (in vulkan_erosion_pipeline.cpp) handles
-  // clipping and normalization after all iterations complete.
-  flow_acc.facc[idx] = new_facc;
+  // Total flow accumulation: 1 (self/rainfall) + incoming from upslope
+  flow_acc.facc[idx] = 1.0 + incoming_flow;
 }
 
-// Apply erosion using the computed flow accumulation
+// Apply erosion using the computed flow accumulation.
+// By the time this pass runs, flow_acc has been downloaded to CPU,
+// clipped, remapped to [0, 1], and re-uploaded — matching the CPU path:
+//   vmax = clipping_ratio * sqrt(mean(facc))
+//   clamp(facc, 0, vmax)
+//   remap(facc) → [0, 1]
 void apply_erosion(int gx, int gy, uint idx)
 {
   float m = mask_buf.mask[idx];
   if (m <= 0.0)
     return;
 
-  // Flow accumulation has already been clipped and remapped to [0, 1]
-  // by the CPU-side remap stage (matching the CPU hmap::hydraulic_stream
-  // behavior: vmax = clipping_ratio * sqrt(mean(facc)), clamp, remap).
+  // Flow accumulation has been remapped to [0, 1] by CPU-side remap stage
   float facc_val = flow_acc.facc[idx];
   float z_old = heightmap.height[idx];
 
-  // Compute erosion amount (facc_val is in [0, 1] from CPU-side remap)
+  // Compute erosion amount: same as CPU's  z -= c_erosion * facc
   float dz = pc.c_erosion * facc_val * m;
 
   // Clamp erosion: cannot erode more than the available height above zero,
@@ -199,7 +199,6 @@ void main()
   if (pc.pass_type == 0)
   {
     // Pass 0: Flow accumulation relaxation step
-    load_shared_tile(gx, gy);
     compute_flow_accumulation_step(gx, gy, idx);
   }
   else
