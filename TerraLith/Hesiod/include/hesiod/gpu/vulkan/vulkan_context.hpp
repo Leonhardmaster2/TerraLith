@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,7 @@ private:
   uint32_t                 queue_family_    = 0;
   VkCommandPool            command_pool_    = VK_NULL_HANDLE;
   VkDescriptorPool         descriptor_pool_ = VK_NULL_HANDLE;
+  mutable std::mutex       descriptor_pool_mutex_;
   VkDebugUtilsMessengerEXT debug_messenger_ = VK_NULL_HANDLE;
   bool                     ready_           = false;
 };
