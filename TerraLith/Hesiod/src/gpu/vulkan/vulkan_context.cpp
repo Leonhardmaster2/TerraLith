@@ -44,6 +44,9 @@ VulkanContext::~VulkanContext()
   if (this->device_ != VK_NULL_HANDLE)
     vkDeviceWaitIdle(this->device_);
 
+  if (this->descriptor_pool_ != VK_NULL_HANDLE)
+    vkDestroyDescriptorPool(this->device_, this->descriptor_pool_, nullptr);
+
   if (this->command_pool_ != VK_NULL_HANDLE)
     vkDestroyCommandPool(this->device_, this->command_pool_, nullptr);
 
@@ -74,6 +77,7 @@ void VulkanContext::init()
     this->select_physical_device();
     this->create_logical_device();
     this->create_command_pool();
+    this->create_descriptor_pool();
     this->ready_ = true;
     Logger::log()->info("VulkanContext initialized successfully");
   }
@@ -273,6 +277,80 @@ void VulkanContext::create_command_pool()
                              std::to_string(result));
 
   Logger::log()->trace("Vulkan command pool created");
+}
+
+// --- Global Descriptor Pool ---
+
+void VulkanContext::create_descriptor_pool()
+{
+  // Generous capacity for all compute pipelines: supports both
+  // STORAGE_BUFFER and UNIFORM_BUFFER descriptor types.
+  VkDescriptorPoolSize pool_sizes[2] = {};
+  pool_sizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+  pool_sizes[0].descriptorCount = 100;
+  pool_sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+  pool_sizes[1].descriptorCount = 100;
+
+  VkDescriptorPoolCreateInfo pool_info{};
+  pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+  pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+  pool_info.maxSets = 100;
+  pool_info.poolSizeCount = 2;
+  pool_info.pPoolSizes = pool_sizes;
+
+  VkResult result =
+      vkCreateDescriptorPool(this->device_, &pool_info, nullptr, &this->descriptor_pool_);
+  if (result != VK_SUCCESS)
+    throw std::runtime_error("Failed to create global descriptor pool, error: " +
+                             std::to_string(result));
+
+  Logger::log()->trace("Global descriptor pool created (100 sets, "
+                       "100 STORAGE_BUFFER + 100 UNIFORM_BUFFER descriptors)");
+}
+
+VkDescriptorPool VulkanContext::descriptor_pool() const
+{
+  return this->descriptor_pool_;
+}
+
+VkDescriptorSet VulkanContext::allocate_descriptor_set(VkDescriptorSetLayout layout)
+{
+  std::lock_guard<std::mutex> lock(this->descriptor_pool_mutex_);
+
+  VkDescriptorSetAllocateInfo alloc_info{};
+  alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  alloc_info.descriptorPool = this->descriptor_pool_;
+  alloc_info.descriptorSetCount = 1;
+  alloc_info.pSetLayouts = &layout;
+
+  VkDescriptorSet set;
+  VkResult        result = vkAllocateDescriptorSets(this->device_, &alloc_info, &set);
+  if (result == VK_ERROR_OUT_OF_POOL_MEMORY)
+  {
+    Logger::log()->error("Global descriptor pool exhausted (VK_ERROR_OUT_OF_POOL_MEMORY). "
+                         "Consider increasing pool capacity or calling "
+                         "reset_descriptor_pool() between render passes.");
+    throw std::runtime_error("Global descriptor pool exhausted — out of pool memory");
+  }
+  if (result != VK_SUCCESS)
+    throw std::runtime_error("Failed to allocate descriptor set from global pool, "
+                             "error: " +
+                             std::to_string(result));
+
+  return set;
+}
+
+void VulkanContext::free_descriptor_set(VkDescriptorSet set)
+{
+  std::lock_guard<std::mutex> lock(this->descriptor_pool_mutex_);
+  vkFreeDescriptorSets(this->device_, this->descriptor_pool_, 1, &set);
+}
+
+void VulkanContext::reset_descriptor_pool()
+{
+  std::lock_guard<std::mutex> lock(this->descriptor_pool_mutex_);
+  vkResetDescriptorPool(this->device_, this->descriptor_pool_, 0);
+  Logger::log()->trace("Global descriptor pool reset");
 }
 
 // --- Helpers ---

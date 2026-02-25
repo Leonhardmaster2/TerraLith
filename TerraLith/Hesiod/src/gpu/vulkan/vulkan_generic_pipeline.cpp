@@ -219,37 +219,8 @@ void VulkanGenericPipeline::dispatch(const std::string                 &shader_n
   auto    &ctx = VulkanContext::instance();
   VkDevice device = ctx.device();
 
-  // WARNING: Descriptor pool is created + destroyed EVERY dispatch call.
-  // This is a significant overhead source — should be pooled/cached.
-  VkDescriptorPoolSize pool_size{};
-  pool_size.type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-  pool_size.descriptorCount = num_bindings;
-
-  VkDescriptorPoolCreateInfo pool_ci{};
-  pool_ci.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  pool_ci.maxSets = 1;
-  pool_ci.poolSizeCount = 1;
-  pool_ci.pPoolSizes = &pool_size;
-
-  VkDescriptorPool desc_pool;
-  VkResult r = vkCreateDescriptorPool(device, &pool_ci, nullptr, &desc_pool);
-  if (r != VK_SUCCESS)
-    throw std::runtime_error("Failed to create descriptor pool");
-
-  // Allocate descriptor set
-  VkDescriptorSetAllocateInfo desc_alloc{};
-  desc_alloc.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  desc_alloc.descriptorPool = desc_pool;
-  desc_alloc.descriptorSetCount = 1;
-  desc_alloc.pSetLayouts = &entry.desc_layout;
-
-  VkDescriptorSet desc_set;
-  r = vkAllocateDescriptorSets(device, &desc_alloc, &desc_set);
-  if (r != VK_SUCCESS)
-  {
-    vkDestroyDescriptorPool(device, desc_pool, nullptr);
-    throw std::runtime_error("Failed to allocate descriptor set");
-  }
+  // Allocate descriptor set from global pool (no per-dispatch pool creation)
+  VkDescriptorSet desc_set = ctx.allocate_descriptor_set(entry.desc_layout);
 
   // Write descriptor set bindings
   std::vector<VkDescriptorBufferInfo> buf_infos(num_bindings);
@@ -305,9 +276,9 @@ void VulkanGenericPipeline::dispatch(const std::string                 &shader_n
 
   auto t_submit_end = Clock::now();
 
-  // Phase C.3: Cleanup per-dispatch resources
+  // Phase C.3: Free descriptor set back to global pool
   auto t_cleanup_start = Clock::now();
-  vkDestroyDescriptorPool(device, desc_pool, nullptr);
+  ctx.free_descriptor_set(desc_set);
   auto t_cleanup_end = Clock::now();
 
   double desc_ms = std::chrono::duration<double, std::milli>(t_desc_end - t_desc_start).count();
