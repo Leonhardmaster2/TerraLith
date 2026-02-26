@@ -3,6 +3,8 @@
 #pragma once
 #include <memory>
 
+#include "nlohmann/json.hpp"
+
 #include "attributes/widgets/attributes_widget.hpp"
 
 #include "hesiod/gui/widgets/graph_node_widget.hpp"
@@ -41,6 +43,10 @@ private:
   bool                      add_toolbar;
 
   attr::AttributesWidget *attributes_widget;
+
+  // Undo support: snapshot of attribute values before the current edit.
+  // Captured at construction time and updated after each undo command push.
+  nlohmann::json pre_change_snapshot_;
 };
 
 } // namespace hesiod

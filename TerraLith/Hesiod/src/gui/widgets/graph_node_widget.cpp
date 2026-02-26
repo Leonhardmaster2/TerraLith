@@ -1611,6 +1611,34 @@ void GraphNodeWidget::remove_link_internal(const std::string &id_out,
   this->suppress_undo_ = false;
 }
 
+void GraphNodeWidget::restore_node_attributes(const std::string    &node_id,
+                                              const nlohmann::json &attrs_json)
+{
+  Logger::log()->trace("GraphNodeWidget::restore_node_attributes: node [{}]", node_id);
+
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return;
+
+  BaseNode *p_node = gno->get_node_ref_by_id<BaseNode>(node_id);
+  if (!p_node)
+    return;
+
+  // Suppress undo pushes during attribute restoration
+  this->suppress_undo_ = true;
+
+  // Restore attribute values from the JSON snapshot.
+  // json_from() gracefully handles missing metadata keys (id, label, etc.)
+  // by keeping their current values, so passing attributes-only JSON is safe.
+  p_node->json_from(attrs_json);
+
+  this->suppress_undo_ = false;
+
+  // Trigger recompute from this node onwards
+  auto sorted = gno->get_nodes_to_update(node_id);
+  this->start_background_compute(sorted);
+}
+
 // =====================================
 // Background Compute
 // =====================================
