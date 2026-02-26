@@ -6,10 +6,13 @@
 #include <QStyle>
 #include <QToolButton>
 
+#include <QUndoStack>
+
 #include "hesiod/app/hesiod_application.hpp"
 #include "hesiod/gui/widgets/documentation_popup.hpp"
 #include "hesiod/gui/widgets/node_attributes_widget.hpp"
 #include "hesiod/gui/widgets/node_settings_widget.hpp"
+#include "hesiod/gui/widgets/undo_commands.hpp"
 #include "hesiod/logger.hpp"
 #include "hesiod/model/nodes/base_node.hpp"
 
@@ -29,6 +32,18 @@ NodeAttributesWidget::NodeAttributesWidget(std::weak_ptr<GraphNode>  p_graph_nod
   this->setAttribute(Qt::WA_DeleteOnClose);
 
   this->setup_layout();
+
+  // Capture initial attribute state for undo support
+  {
+    auto gno = this->p_graph_node.lock();
+    if (gno)
+    {
+      if (BaseNode *p_node = gno->get_node_ref_by_id<BaseNode>(this->node_id))
+        for (const auto &[key, attr] : *p_node->get_attributes_ref())
+          this->pre_change_snapshot_[key] = attr->json_to();
+    }
+  }
+
   this->setup_connections();
 }
 
@@ -174,7 +189,36 @@ void NodeAttributesWidget::setup_connections()
                 &attr::AttributesWidget::value_changed,
                 [this]()
                 {
-                  // Check if auto-update is enabled by walking up to NodeSettingsWidget
+                  // --- Undo support: push property change command ---
+                  auto gno = this->p_graph_node.lock();
+                  if (gno && this->p_graph_node_widget)
+                  {
+                    if (BaseNode *p_node =
+                            gno->get_node_ref_by_id<BaseNode>(this->node_id))
+                    {
+                      // Capture current (post-change) attribute state
+                      nlohmann::json new_snapshot;
+                      for (const auto &[key, attr] : *p_node->get_attributes_ref())
+                        new_snapshot[key] = attr->json_to();
+
+                      // Only push if something actually changed
+                      if (new_snapshot != this->pre_change_snapshot_)
+                      {
+                        QUndoStack *stack =
+                            this->p_graph_node_widget->get_undo_stack();
+                        if (stack)
+                          stack->push(new PropertyChangeCommand(
+                              this->p_graph_node_widget,
+                              this->node_id,
+                              this->pre_change_snapshot_,
+                              new_snapshot));
+
+                        this->pre_change_snapshot_ = new_snapshot;
+                      }
+                    }
+                  }
+
+                  // --- Original behavior: check auto-update and trigger recompute ---
                   QWidget *ancestor = this->parentWidget();
                   while (ancestor)
                   {

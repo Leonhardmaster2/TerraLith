@@ -24,6 +24,7 @@ enum UndoCommandId
   CMD_ADD_LINK,
   CMD_REMOVE_LINK,
   CMD_MOVE_NODES,
+  CMD_CHANGE_PROPERTY, // property/attribute value change on a node
 };
 
 // =====================================
@@ -156,6 +157,34 @@ private:
   std::map<std::string, QPointF> old_positions;
   std::map<std::string, QPointF> new_positions;
   bool                           first_redo = true;
+};
+
+// =====================================
+// PropertyChangeCommand
+// =====================================
+// Captures attribute changes on a single node. Stores before/after attribute
+// JSON snapshots (attribute keys only, no node metadata).
+// On undo: restores old attributes and triggers recompute.
+// On redo: restores new attributes and triggers recompute.
+class PropertyChangeCommand : public QUndoCommand
+{
+public:
+  PropertyChangeCommand(GraphNodeWidget   *widget,
+                        const std::string &node_id,
+                        nlohmann::json     old_attrs,
+                        nlohmann::json     new_attrs,
+                        QUndoCommand      *parent = nullptr);
+
+  void undo() override;
+  void redo() override;
+  int  id() const override { return CMD_CHANGE_PROPERTY; }
+
+private:
+  QPointer<GraphNodeWidget> widget;
+  std::string               node_id;
+  nlohmann::json            old_attrs;
+  nlohmann::json            new_attrs;
+  bool                      first_redo = true;
 };
 
 } // namespace hesiod
