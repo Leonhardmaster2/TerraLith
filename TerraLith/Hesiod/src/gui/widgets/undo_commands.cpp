@@ -279,4 +279,114 @@ void PropertyChangeCommand::redo()
   widget->restore_node_attributes(node_id, new_attrs);
 }
 
+// =====================================
+// PasteNodesCommand
+// =====================================
+
+PasteNodesCommand::PasteNodesCommand(GraphNodeWidget         *widget,
+                                     std::vector<std::string> created_node_ids,
+                                     QUndoCommand            *parent)
+    : QUndoCommand(parent), widget(widget),
+      created_node_ids(std::move(created_node_ids))
+{
+  setText("Paste Nodes");
+}
+
+void PasteNodesCommand::undo()
+{
+  if (!widget)
+    return;
+
+  // Capture a full snapshot before deleting so redo can restore with same IDs
+  snapshot = widget->build_nodes_snapshot(created_node_ids);
+
+  widget->delete_nodes_by_ids(created_node_ids);
+}
+
+void PasteNodesCommand::redo()
+{
+  if (!widget)
+    return;
+
+  if (first_redo)
+  {
+    first_redo = false;
+    return;
+  }
+
+  // Restore from snapshot — preserves original node IDs
+  widget->restore_nodes_from_snapshot(snapshot);
+}
+
+// =====================================
+// DropNodeOnLinkCommand
+// =====================================
+
+DropNodeOnLinkCommand::DropNodeOnLinkCommand(GraphNodeWidget   *widget,
+                                             const std::string &original_out_id,
+                                             const std::string &original_out_port,
+                                             const std::string &original_in_id,
+                                             const std::string &original_in_port,
+                                             const std::string &dropped_node_id,
+                                             const std::string &dropped_in_port,
+                                             const std::string &dropped_out_port,
+                                             QUndoCommand      *parent)
+    : QUndoCommand(parent), widget(widget), original_out_id(original_out_id),
+      original_out_port(original_out_port), original_in_id(original_in_id),
+      original_in_port(original_in_port), dropped_node_id(dropped_node_id),
+      dropped_in_port(dropped_in_port), dropped_out_port(dropped_out_port)
+{
+  setText("Insert Node Into Link");
+}
+
+void DropNodeOnLinkCommand::undo()
+{
+  if (!widget)
+    return;
+
+  // Remove the two new links
+  widget->remove_link_internal(original_out_id,
+                               original_out_port,
+                               dropped_node_id,
+                               dropped_in_port);
+  widget->remove_link_internal(dropped_node_id,
+                               dropped_out_port,
+                               original_in_id,
+                               original_in_port);
+
+  // Recreate the original link
+  widget->create_link_internal(original_out_id,
+                               original_out_port,
+                               original_in_id,
+                               original_in_port);
+}
+
+void DropNodeOnLinkCommand::redo()
+{
+  if (!widget)
+    return;
+
+  if (first_redo)
+  {
+    first_redo = false;
+    return;
+  }
+
+  // Remove the original link
+  widget->remove_link_internal(original_out_id,
+                               original_out_port,
+                               original_in_id,
+                               original_in_port);
+
+  // Create the two new links through the dropped node
+  widget->create_link_internal(original_out_id,
+                               original_out_port,
+                               dropped_node_id,
+                               dropped_in_port);
+  widget->create_link_internal(dropped_node_id,
+                               dropped_out_port,
+                               original_in_id,
+                               original_in_port);
+}
+
 } // namespace hesiod

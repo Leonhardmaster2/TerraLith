@@ -3,6 +3,7 @@
 #pragma once
 #include <memory>
 
+#include <QAction>
 #include <QApplication>
 #include <QCoreApplication>
 #include <QProgressBar>
@@ -71,11 +72,18 @@ private:
   void cleanup();
   void setup_menu_bar();
 
+  void update_undo_redo_actions();
+
   // --- Members (respect order for deletion)
   AppContext                 context;
   MainWindow                *main_window;
   std::unique_ptr<ProjectUI> project_ui;          // because top-level UI
   AppSettingsWindow         *app_settings_window; // owned by MainWindow
+
+  // Edit menu actions (need to update text dynamically)
+  QAction            *undo_action = nullptr;
+  QAction            *redo_action = nullptr;
+  QMetaObject::Connection undo_stack_connection_;
 };
 
 } // namespace hesiod

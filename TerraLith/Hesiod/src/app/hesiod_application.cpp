@@ -12,6 +12,7 @@
 #include <QMessageBox>
 #include <QProgressDialog>
 #include <QStatusBar>
+#include <QUndoStack>
 #include <QUrl>
 
 #include "highmap/opencl/gpu_opencl.hpp"
@@ -295,6 +296,33 @@ void HesiodApplication::load_project_model_and_ui(const std::string &fname,
                   }
                 });
 
+  // Update Edit menu undo/redo text when the active tab changes or
+  // when the active tab's undo stack state changes
+  this->connect(this->project_ui->get_graph_tabs_widget_ref(),
+                &GraphTabsWidget::active_tab_changed,
+                this,
+                [this](GraphEditorWidget *editor)
+                {
+                  // Disconnect any previous stack connection
+                  if (this->undo_stack_connection_)
+                    QObject::disconnect(this->undo_stack_connection_);
+
+                  if (editor)
+                  {
+                    auto *gnw = editor->get_graph_node_widget();
+                    QUndoStack *stack = gnw ? gnw->get_undo_stack() : nullptr;
+                    if (stack)
+                    {
+                      this->undo_stack_connection_ = this->connect(
+                          stack,
+                          &QUndoStack::indexChanged,
+                          this,
+                          &HesiodApplication::update_undo_redo_actions);
+                    }
+                  }
+                  this->update_undo_redo_actions();
+                });
+
   // The initial active_tab_changed signal fired during GraphTabsWidget
   // construction, before the connection above was established. Manually
   // populate the docks now for the currently active tab.
@@ -304,6 +332,19 @@ void HesiodApplication::load_project_model_and_ui(const std::string &fname,
     {
       this->main_window->set_viewer_dock_widget(editor->get_viewer());
       this->main_window->set_settings_dock_widget(editor->get_node_settings_widget());
+
+      // Wire up the undo stack for the initial tab
+      auto *gnw = editor->get_graph_node_widget();
+      QUndoStack *stack = gnw ? gnw->get_undo_stack() : nullptr;
+      if (stack)
+      {
+        this->undo_stack_connection_ = this->connect(
+            stack,
+            &QUndoStack::indexChanged,
+            this,
+            &HesiodApplication::update_undo_redo_actions);
+      }
+      this->update_undo_redo_actions();
     }
   }
 
@@ -814,17 +855,42 @@ void HesiodApplication::setup_menu_bar()
   quit->setIcon(HSD_ICON("exit_to_app"));
   file_menu->addAction(quit);
 
-  // --- edit (undo/redo)
+  // --- edit (undo/redo + clipboard + delete)
 
   QMenu *edit_menu = this->main_window->menuBar()->addMenu("&Edit");
 
-  auto *undo_action = new QAction("Undo", this);
-  undo_action->setShortcut(tr("Ctrl+Z"));
-  edit_menu->addAction(undo_action);
+  this->undo_action = new QAction("Undo", this);
+  this->undo_action->setShortcut(tr("Ctrl+Z"));
+  this->undo_action->setEnabled(false);
+  edit_menu->addAction(this->undo_action);
 
-  auto *redo_action = new QAction("Redo", this);
-  redo_action->setShortcut(tr("Ctrl+Shift+Z"));
-  edit_menu->addAction(redo_action);
+  this->redo_action = new QAction("Redo", this);
+  this->redo_action->setShortcuts({QKeySequence(tr("Ctrl+Shift+Z")),
+                                   QKeySequence(tr("Ctrl+Y"))});
+  this->redo_action->setEnabled(false);
+  edit_menu->addAction(this->redo_action);
+
+  edit_menu->addSeparator();
+
+  // Note: no keyboard shortcuts on these — Ctrl+C/V/D/A/Delete are already
+  // handled by GraphViewer::keyReleaseEvent. Adding QAction shortcuts here
+  // would cause double-execution. Menu items provide mouse-based access.
+  auto *copy_action = new QAction("Copy\tCtrl+C", this);
+  edit_menu->addAction(copy_action);
+
+  auto *paste_action = new QAction("Paste\tCtrl+V", this);
+  edit_menu->addAction(paste_action);
+
+  auto *duplicate_action = new QAction("Duplicate\tCtrl+D", this);
+  edit_menu->addAction(duplicate_action);
+
+  edit_menu->addSeparator();
+
+  auto *delete_action = new QAction("Delete\tDel", this);
+  edit_menu->addAction(delete_action);
+
+  auto *select_all_action = new QAction("Select All\tCtrl+A", this);
+  edit_menu->addAction(select_all_action);
 
   // --- project
 
@@ -889,40 +955,90 @@ void HesiodApplication::setup_menu_bar()
   // --- connections
 
   // Edit menu: undo/redo — route to the active graph widget's undo stack
-  this->connect(undo_action,
+  auto get_active_gnw = [this]() -> GraphNodeWidget *
+  {
+    if (!this->project_ui)
+      return nullptr;
+    auto *tabs = this->project_ui->get_graph_tabs_widget_ref();
+    if (!tabs)
+      return nullptr;
+    auto *editor = tabs->get_active_editor();
+    if (!editor)
+      return nullptr;
+    return editor->get_graph_node_widget();
+  };
+
+  this->connect(this->undo_action,
                 &QAction::triggered,
                 this,
-                [this]()
+                [get_active_gnw]()
                 {
-                  if (!this->project_ui)
-                    return;
-                  auto *tabs = this->project_ui->get_graph_tabs_widget_ref();
-                  if (!tabs)
-                    return;
-                  auto *editor = tabs->get_active_editor();
-                  if (!editor)
-                    return;
-                  auto *gnw = editor->get_graph_node_widget();
-                  if (gnw)
+                  if (auto *gnw = get_active_gnw())
                     gnw->on_undo_request();
                 });
 
-  this->connect(redo_action,
+  this->connect(this->redo_action,
                 &QAction::triggered,
                 this,
-                [this]()
+                [get_active_gnw]()
                 {
-                  if (!this->project_ui)
-                    return;
-                  auto *tabs = this->project_ui->get_graph_tabs_widget_ref();
-                  if (!tabs)
-                    return;
-                  auto *editor = tabs->get_active_editor();
-                  if (!editor)
-                    return;
-                  auto *gnw = editor->get_graph_node_widget();
-                  if (gnw)
+                  if (auto *gnw = get_active_gnw())
                     gnw->on_redo_request();
+                });
+
+  this->connect(copy_action,
+                &QAction::triggered,
+                this,
+                [get_active_gnw]()
+                {
+                  if (auto *gnw = get_active_gnw())
+                  {
+                    std::vector<QPointF> scene_pos_list;
+                    auto ids = gnw->get_selected_node_ids(&scene_pos_list);
+                    if (!ids.empty())
+                      gnw->on_nodes_copy_request(ids, scene_pos_list);
+                  }
+                });
+
+  this->connect(paste_action,
+                &QAction::triggered,
+                this,
+                [get_active_gnw]()
+                {
+                  if (auto *gnw = get_active_gnw())
+                    gnw->on_nodes_paste_request();
+                });
+
+  this->connect(duplicate_action,
+                &QAction::triggered,
+                this,
+                [get_active_gnw]()
+                {
+                  if (auto *gnw = get_active_gnw())
+                  {
+                    std::vector<QPointF> scene_pos_list;
+                    auto ids = gnw->get_selected_node_ids(&scene_pos_list);
+                    if (!ids.empty())
+                      gnw->on_nodes_duplicate_request(ids, scene_pos_list);
+                  }
+                });
+
+  this->connect(delete_action,
+                &QAction::triggered,
+                this,
+                [get_active_gnw]()
+                {
+                  if (auto *gnw = get_active_gnw())
+                    gnw->delete_selected_with_undo();
+                });
+
+  this->connect(select_all_action,
+                &QAction::triggered,
+                this,
+                [get_active_gnw]()
+                {
+                  if (auto *gnw = get_active_gnw())
+                    gnw->select_all();
                 });
 
   this->connect(new_action, &QAction::triggered, this, &HesiodApplication::on_new);
@@ -1041,6 +1157,43 @@ void HesiodApplication::setup_menu_bar()
                 this,
                 [this]()
                 { this->project_ui->get_graph_manager_widget_ref()->on_reseed(true); });
+}
+
+void HesiodApplication::update_undo_redo_actions()
+{
+  if (!this->project_ui)
+  {
+    this->undo_action->setEnabled(false);
+    this->undo_action->setText("Undo");
+    this->redo_action->setEnabled(false);
+    this->redo_action->setText("Redo");
+    return;
+  }
+
+  auto *tabs = this->project_ui->get_graph_tabs_widget_ref();
+  auto *editor = tabs ? tabs->get_active_editor() : nullptr;
+  auto *gnw = editor ? editor->get_graph_node_widget() : nullptr;
+  QUndoStack *stack = gnw ? gnw->get_undo_stack() : nullptr;
+
+  if (stack)
+  {
+    this->undo_action->setEnabled(stack->canUndo());
+    QString undo_text = stack->undoText();
+    this->undo_action->setText(undo_text.isEmpty() ? "Undo"
+                                                    : "Undo " + undo_text);
+
+    this->redo_action->setEnabled(stack->canRedo());
+    QString redo_text = stack->redoText();
+    this->redo_action->setText(redo_text.isEmpty() ? "Redo"
+                                                    : "Redo " + redo_text);
+  }
+  else
+  {
+    this->undo_action->setEnabled(false);
+    this->undo_action->setText("Undo");
+    this->redo_action->setEnabled(false);
+    this->redo_action->setText("Redo");
+  }
 }
 
 void HesiodApplication::show()
