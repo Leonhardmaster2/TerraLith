@@ -136,6 +136,10 @@ void GraphNodeWidget::automatic_node_layout()
   QRectF      bbox = this->get_bounding_box();
   QPointF     origin = bbox.topLeft();
 
+  // Capture old positions for undo
+  std::map<std::string, QPointF> old_positions;
+  std::map<std::string, QPointF> new_positions;
+
   size_t k = 0;
 
   for (auto &[nid, _] : gno->get_nodes())
@@ -155,8 +159,17 @@ void GraphNodeWidget::automatic_node_layout()
     gngui::GraphicsNode *p_gfx_node = this->get_graphics_node_by_id(nid);
 
     if (p_gfx_node)
+    {
+      old_positions[nid] = p_gfx_node->scenePos();
+      new_positions[nid] = scene_pos;
       p_gfx_node->setPos(scene_pos);
+    }
   }
+
+  // Push undo command for the layout change
+  if (!old_positions.empty() && this->undo_stack)
+    this->undo_stack->push(
+        new MoveNodesCommand(this, old_positions, new_positions));
 
   QTimer::singleShot(0, [this]() { this->zoom_to_content(); });
 }
@@ -252,6 +265,10 @@ void GraphNodeWidget::json_from(nlohmann::json const &json)
   GraphViewer::json_from(json);
   this->suppress_undo_ = false;
   this->update_node_on_connection_finished = true;
+
+  // Clear undo history — the loaded graph is a fresh baseline
+  if (this->undo_stack)
+    this->undo_stack->clear();
 
   // viewers
   if (json.contains("viewers") && json["viewers"].is_array())
