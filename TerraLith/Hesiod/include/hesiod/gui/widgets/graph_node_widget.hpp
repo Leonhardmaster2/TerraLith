@@ -2,6 +2,7 @@
    License. The full license is in the file LICENSE, distributed with this software. */
 #pragma once
 #include <functional>
+#include <map>
 #include <memory>
 
 #include <QScrollArea>
@@ -115,15 +116,33 @@ public slots:
   // Used by undo commands to re-delete nodes during redo
   void delete_nodes_by_ids(const std::vector<std::string> &ids);
 
+  // --- Undo command helpers (called by undo command classes) ---
+  void restore_nodes_from_snapshot(const nlohmann::json &snapshot);
+  void create_node_with_id(const std::string  &node_type,
+                           const std::string  &node_id,
+                           QPointF             scene_pos,
+                           const nlohmann::json &settings);
+  void create_link_internal(const std::string &id_out,
+                            const std::string &port_id_out,
+                            const std::string &id_in,
+                            const std::string &port_id_in);
+  void remove_link_internal(const std::string &id_out,
+                            const std::string &port_id_out,
+                            const std::string &id_in,
+                            const std::string &port_id_in);
+
   // --- Others... ---
   void on_new_graphics_node_request(const std::string &node_id, QPointF scene_pos);
 
   // --- Undo / Redo ---
-  void on_undo_request();
-  void on_redo_request();
+  void        on_undo_request();
+  void        on_redo_request();
+  QUndoStack *get_undo_stack() { return this->undo_stack; }
 
 protected:
   void keyPressEvent(QKeyEvent *event) override;
+  void mousePressEvent(QMouseEvent *event) override;
+  void mouseReleaseEvent(QMouseEvent *event) override;
 
 private slots:
   // --- Background Compute Slots ---
@@ -155,7 +174,9 @@ private:
   std::vector<std::string>       selected_ids;
 
   // Undo / Redo
-  QUndoStack *undo_stack = nullptr;
+  QUndoStack                        *undo_stack = nullptr;
+  std::map<std::string, QPointF>     drag_start_positions_;
+  bool                               suppress_undo_ = false; // when true, skip pushing undo commands
 
   // Background compute
   QThread     *worker_thread_ = nullptr;

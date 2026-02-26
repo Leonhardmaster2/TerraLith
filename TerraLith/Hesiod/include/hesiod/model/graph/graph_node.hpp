@@ -34,7 +34,8 @@ public:
   nlohmann::json json_to() const;
 
   // --- Config. ---
-  GraphConfig *get_config_ref() { return this->config.get(); }
+  GraphConfig                  *get_config_ref() { return this->config.get(); }
+  std::shared_ptr<GraphConfig>  get_config_shared() { return this->config; }
   void         change_config_values(const GraphConfig &new_config);
 
   // --- Node Factory (create nodes from their type) ---

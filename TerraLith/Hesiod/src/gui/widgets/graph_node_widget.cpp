@@ -7,6 +7,7 @@
 #include <QFileDialog>
 #include <QKeyEvent>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QMessageBox>
 #include <QScreen>
 #include <QTimer>
@@ -23,6 +24,7 @@
 #include "hesiod/gui/widgets/custom_qmenu.hpp"
 #include "hesiod/gui/widgets/graph_config_dialog.hpp"
 #include "hesiod/gui/widgets/graph_node_widget.hpp"
+#include "hesiod/gui/widgets/undo_commands.hpp"
 #include "hesiod/gui/workers/graph_worker.hpp"
 #include "hesiod/gui/widgets/gui_utils.hpp"
 #include "hesiod/gui/widgets/node_attributes_widget.hpp"
@@ -37,56 +39,6 @@
 
 namespace hesiod
 {
-
-// =====================================
-// DeleteNodesCommand — captures selected nodes+links as JSON,
-// deletes on redo, reimports on undo.
-// =====================================
-class DeleteNodesCommand : public QUndoCommand
-{
-public:
-  DeleteNodesCommand(GraphNodeWidget    *widget,
-                     nlohmann::json      snapshot,
-                     std::vector<std::string> node_ids,
-                     QUndoCommand       *parent = nullptr)
-      : QUndoCommand(parent), widget(widget), snapshot(std::move(snapshot)),
-        node_ids(std::move(node_ids))
-  {
-    setText("Delete Nodes");
-  }
-
-  void undo() override
-  {
-    if (!widget)
-      return;
-
-    // Reimport nodes + internal links from the stored JSON snapshot
-    widget->json_import(snapshot, QPointF(0.f, 0.f));
-  }
-
-  void redo() override
-  {
-    if (!widget)
-      return;
-
-    // Skip the first redo — the action was already performed when the
-    // command was created (avoids double-delete)
-    if (first_redo)
-    {
-      first_redo = false;
-      return;
-    }
-
-    // Re-delete the nodes via the public helper
-    widget->delete_nodes_by_ids(node_ids);
-  }
-
-private:
-  QPointer<GraphNodeWidget>    widget;
-  nlohmann::json               snapshot;
-  std::vector<std::string>     node_ids;
-  bool                         first_redo = true;
-};
 
 GraphNodeWidget::GraphNodeWidget(std::weak_ptr<GraphNode> p_graph_node, QWidget *parent)
     : GraphViewer("", parent), p_graph_node(p_graph_node)
@@ -296,7 +248,9 @@ void GraphNodeWidget::json_from(nlohmann::json const &json)
   // to prevent nodes update at each link creation when the loading
   // the graph (very slooow)
   this->update_node_on_connection_finished = false;
+  this->suppress_undo_ = true;
   GraphViewer::json_from(json);
+  this->suppress_undo_ = false;
   this->update_node_on_connection_finished = true;
 
   // viewers
@@ -342,6 +296,9 @@ nlohmann::json GraphNodeWidget::json_import(nlohmann::json const &json, QPointF 
   auto gno = this->p_graph_node.lock();
   if (!gno)
     return nlohmann::json();
+
+  // Suppress individual undo commands during import (the caller handles undo)
+  this->suppress_undo_ = true;
 
   // work on a copy of the json to modify the node IDs and return it
   nlohmann::json json_copy = json;
@@ -404,6 +361,8 @@ nlohmann::json GraphNodeWidget::json_import(nlohmann::json const &json, QPointF 
     }
   }
 
+  this->suppress_undo_ = false;
+
   return json_copy;
 }
 
@@ -448,6 +407,12 @@ void GraphNodeWidget::on_connection_deleted(const std::string &id_out,
   QCoreApplication::processEvents();
 
   gno->remove_link(id_out, port_id_out, id_in, port_id_in);
+
+  // Push undo command for user-initiated link removal (skip during node deletion
+  // and during undo/redo replay)
+  if (!this->suppress_undo_ && !prevent_graph_update && this->undo_stack)
+    this->undo_stack->push(
+        new RemoveLinkCommand(this, id_out, port_id_out, id_in, port_id_in));
 
   // see GraphNodeWidget::on_node_deleted
   QCoreApplication::processEvents();
@@ -537,6 +502,12 @@ void GraphNodeWidget::on_connection_finished(const std::string &id_out,
     return;
 
   gno->new_link(id_out, port_id_out, id_in, port_id_in);
+
+  // Push undo command for user-initiated link creation
+  if (!this->suppress_undo_ && this->undo_stack &&
+      this->update_node_on_connection_finished)
+    this->undo_stack->push(
+        new AddLinkCommand(this, id_out, port_id_out, id_in, port_id_in));
 
   // no update for instance during deserialization to avoid a full
   // graph update at each link creation
@@ -775,6 +746,10 @@ std::string GraphNodeWidget::on_new_node_request(const std::string &node_type,
   Q_EMIT this->new_node_created(this->get_id(), node_id);
 
   this->last_node_created_id = node_id;
+
+  // Push undo command (skip during undo/redo replay and import operations)
+  if (!this->suppress_undo_ && this->undo_stack)
+    this->undo_stack->push(new AddNodeCommand(this, node_id, node_type, scene_pos));
 
   return node_id;
 }
@@ -1195,6 +1170,54 @@ void GraphNodeWidget::keyPressEvent(QKeyEvent *event)
   GraphViewer::keyPressEvent(event);
 }
 
+void GraphNodeWidget::mousePressEvent(QMouseEvent *event)
+{
+  // Capture positions of selected nodes before drag starts (for move undo)
+  if (event->button() == Qt::LeftButton)
+  {
+    this->drag_start_positions_.clear();
+    std::vector<QPointF>     pos_list;
+    std::vector<std::string> ids = this->get_selected_node_ids(&pos_list);
+    for (size_t k = 0; k < ids.size(); k++)
+      this->drag_start_positions_[ids[k]] = pos_list[k];
+  }
+
+  GraphViewer::mousePressEvent(event);
+}
+
+void GraphNodeWidget::mouseReleaseEvent(QMouseEvent *event)
+{
+  GraphViewer::mouseReleaseEvent(event);
+
+  // Check if selected nodes actually moved and push a MoveNodesCommand
+  if (event->button() == Qt::LeftButton && !this->drag_start_positions_.empty())
+  {
+    std::map<std::string, QPointF> new_positions;
+    bool any_moved = false;
+
+    for (auto &[node_id, old_pos] : this->drag_start_positions_)
+    {
+      gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(node_id);
+      if (!p_gfx)
+        continue;
+
+      QPointF new_pos = p_gfx->scenePos();
+      new_positions[node_id] = new_pos;
+
+      // Check for meaningful movement (more than 0.5px to avoid float noise)
+      QPointF diff = new_pos - old_pos;
+      if (qAbs(diff.x()) > 0.5 || qAbs(diff.y()) > 0.5)
+        any_moved = true;
+    }
+
+    if (any_moved && this->undo_stack)
+      this->undo_stack->push(
+          new MoveNodesCommand(this, this->drag_start_positions_, new_positions));
+
+    this->drag_start_positions_.clear();
+  }
+}
+
 void GraphNodeWidget::delete_selected_with_undo()
 {
   Logger::log()->trace("GraphNodeWidget::delete_selected_with_undo");
@@ -1203,7 +1226,7 @@ void GraphNodeWidget::delete_selected_with_undo()
   if (!gno)
     return;
 
-  // Gather selected node IDs + positions (same as copy logic)
+  // Gather selected node IDs + positions
   std::vector<QPointF>     scene_pos_list;
   std::vector<std::string> id_list = this->get_selected_node_ids(&scene_pos_list);
 
@@ -1215,7 +1238,7 @@ void GraphNodeWidget::delete_selected_with_undo()
     return;
   }
 
-  // Serialize selected nodes + their internal links into a JSON snapshot
+  // Serialize selected nodes into a JSON snapshot
   nlohmann::json snapshot;
   snapshot["nodes"] = nlohmann::json::array();
 
@@ -1241,28 +1264,39 @@ void GraphNodeWidget::delete_selected_with_undo()
     snapshot["nodes"].push_back(json_node);
   }
 
-  // Capture links between the selected nodes
-  snapshot["links"] = nlohmann::json::array();
+  // Capture ALL links touching the selected nodes: internal AND external
+  snapshot["internal_links"] = nlohmann::json::array();
+  snapshot["external_links"] = nlohmann::json::array();
+
   for (auto &link : gno->get_links())
   {
-    if (contains(id_list, link.from) && contains(id_list, link.to))
-    {
-      nlohmann::json json_link;
-      gnode::Node   *p_from = gno->get_node_ref_by_id(link.from);
-      gnode::Node   *p_to = gno->get_node_ref_by_id(link.to);
-      if (p_from && p_to)
-      {
-        json_link["node_out_id"] = link.from;
-        json_link["node_in_id"] = link.to;
-        json_link["port_out_id"] = p_from->get_port_label(link.port_from);
-        json_link["port_in_id"] = p_to->get_port_label(link.port_to);
-        snapshot["links"].push_back(json_link);
-      }
-    }
+    bool from_selected = contains(id_list, link.from);
+    bool to_selected = contains(id_list, link.to);
+
+    if (!from_selected && !to_selected)
+      continue;
+
+    gnode::Node *p_from = gno->get_node_ref_by_id(link.from);
+    gnode::Node *p_to = gno->get_node_ref_by_id(link.to);
+    if (!p_from || !p_to)
+      continue;
+
+    nlohmann::json json_link;
+    json_link["node_out_id"] = link.from;
+    json_link["node_in_id"] = link.to;
+    json_link["port_out_id"] = p_from->get_port_label(link.port_from);
+    json_link["port_in_id"] = p_to->get_port_label(link.port_to);
+
+    if (from_selected && to_selected)
+      snapshot["internal_links"].push_back(json_link);
+    else
+      snapshot["external_links"].push_back(json_link);
   }
 
-  // Now perform the actual deletion
+  // Now perform the actual deletion (suppress undo to avoid spurious link removal commands)
+  this->suppress_undo_ = true;
   this->delete_selected_items();
+  this->suppress_undo_ = false;
 
   // Push the undo command (first_redo is skipped since we just deleted)
   if (this->undo_stack)
@@ -1274,6 +1308,11 @@ void GraphNodeWidget::delete_nodes_by_ids(const std::vector<std::string> &ids)
   auto gno = this->p_graph_node.lock();
   if (!gno)
     return;
+
+  // Suppress undo pushes: deleting nodes triggers link removal signals which
+  // would otherwise generate spurious RemoveLinkCommands
+  bool was_suppressed = this->suppress_undo_;
+  this->suppress_undo_ = true;
 
   for (auto &id : ids)
   {
@@ -1297,6 +1336,8 @@ void GraphNodeWidget::delete_nodes_by_ids(const std::vector<std::string> &ids)
       Q_EMIT this->node_deleted(this->get_id(), id);
     }
   }
+
+  this->suppress_undo_ = was_suppressed;
 }
 
 void GraphNodeWidget::on_undo_request()
@@ -1316,6 +1357,258 @@ void GraphNodeWidget::on_redo_request()
 void GraphNodeWidget::set_json_copy_buffer(nlohmann::json const &new_json_copy_buffer)
 {
   this->json_copy_buffer = new_json_copy_buffer;
+}
+
+// =====================================
+// Undo Command Helpers
+// =====================================
+
+void GraphNodeWidget::restore_nodes_from_snapshot(const nlohmann::json &snapshot)
+{
+  Logger::log()->trace("GraphNodeWidget::restore_nodes_from_snapshot");
+
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return;
+
+  // Suppress undo pushes during restore
+  this->suppress_undo_ = true;
+
+  // 1. Recreate nodes with their original IDs
+  if (snapshot.contains("nodes"))
+  {
+    for (auto &json_node : snapshot["nodes"])
+    {
+      std::string caption = json_node.value("caption", "");
+      std::string original_id = json_node.value("id", "");
+
+      if (caption.empty() || original_id.empty())
+        continue;
+
+      QPointF pos(json_node.value("scene_position.x", 0.0f),
+                  json_node.value("scene_position.y", 0.0f));
+
+      // Create with original ID preserved
+      this->create_node_with_id(caption, original_id, pos,
+                                json_node.value("settings", nlohmann::json()));
+    }
+  }
+
+  // 2. Restore internal links (between restored nodes)
+  std::string internal_key = snapshot.contains("internal_links") ? "internal_links"
+                                                                 : "links";
+  if (snapshot.contains(internal_key))
+  {
+    for (auto &json_link : snapshot[internal_key])
+    {
+      std::string id_out = json_link.value("node_out_id", "");
+      std::string id_in = json_link.value("node_in_id", "");
+      std::string port_out = json_link.value("port_out_id", "");
+      std::string port_in = json_link.value("port_in_id", "");
+
+      if (id_out.empty() || id_in.empty())
+        continue;
+
+      // Both nodes are restored, safe to connect
+      this->add_link(id_out, port_out, id_in, port_in);
+      gno->new_link(id_out, port_out, id_in, port_in);
+    }
+  }
+
+  // 3. Restore external links (connecting to surviving nodes)
+  if (snapshot.contains("external_links"))
+  {
+    for (auto &json_link : snapshot["external_links"])
+    {
+      std::string id_out = json_link.value("node_out_id", "");
+      std::string id_in = json_link.value("node_in_id", "");
+      std::string port_out = json_link.value("port_out_id", "");
+      std::string port_in = json_link.value("port_in_id", "");
+
+      if (id_out.empty() || id_in.empty())
+        continue;
+
+      // Verify both endpoints exist before reconnecting (per reviewer note:
+      // the surviving node might have been deleted by another operation)
+      if (gno->is_node_id_available(id_out) || gno->is_node_id_available(id_in))
+      {
+        Logger::log()->warn(
+            "GraphNodeWidget::restore_nodes_from_snapshot: skipping external link "
+            "{}:{} -> {}:{} — endpoint no longer exists",
+            id_out,
+            port_out,
+            id_in,
+            port_in);
+        continue;
+      }
+
+      // Verify the specific ports still exist on both nodes
+      gnode::Node *p_from = gno->get_node_ref_by_id(id_out);
+      gnode::Node *p_to = gno->get_node_ref_by_id(id_in);
+      if (!p_from || !p_to)
+        continue;
+
+      int from_port_idx = p_from->get_port_index(port_out);
+      int to_port_idx = p_to->get_port_index(port_in);
+      if (from_port_idx < 0 || to_port_idx < 0)
+      {
+        Logger::log()->warn(
+            "GraphNodeWidget::restore_nodes_from_snapshot: skipping external link "
+            "— port not found: {}:{} -> {}:{}",
+            id_out,
+            port_out,
+            id_in,
+            port_in);
+        continue;
+      }
+
+      this->add_link(id_out, port_out, id_in, port_in);
+      gno->new_link(id_out, port_out, id_in, port_in);
+    }
+  }
+
+  this->suppress_undo_ = false;
+
+  // 4. Trigger recompute for restored nodes
+  std::vector<std::string> dirty_ids;
+  if (snapshot.contains("nodes"))
+  {
+    for (auto &json_node : snapshot["nodes"])
+    {
+      std::string nid = json_node.value("id", "");
+      if (!nid.empty() && !gno->is_node_id_available(nid))
+      {
+        gno->get_node_ref_by_id(nid)->is_dirty = true;
+        dirty_ids.push_back(nid);
+      }
+    }
+  }
+  if (!dirty_ids.empty())
+  {
+    auto sorted = gno->topological_sort(dirty_ids);
+    this->start_background_compute(sorted);
+  }
+}
+
+void GraphNodeWidget::create_node_with_id(const std::string    &node_type,
+                                          const std::string    &node_id,
+                                          QPointF               scene_pos,
+                                          const nlohmann::json &settings)
+{
+  Logger::log()->trace("GraphNodeWidget::create_node_with_id: {} as {}", node_type, node_id);
+
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return;
+
+  // Create the model node via the factory
+  std::shared_ptr<gnode::Node> node = node_factory(node_type, gno->get_config_shared());
+  node->compute();
+
+  // Add with the specific ID (preserving the original)
+  gno->add_node(node, node_id);
+
+  // Restore settings if available
+  if (!settings.is_null() && settings.is_object())
+  {
+    BaseNode *p_node = gno->get_node_ref_by_id<BaseNode>(node_id);
+    if (p_node)
+    {
+      p_node->json_from(settings);
+      p_node->set_id(node_id);
+    }
+  }
+
+  // Create the graphics node
+  this->on_new_graphics_node_request(node_id, scene_pos);
+
+  Q_EMIT this->new_node_created(this->get_id(), node_id);
+}
+
+void GraphNodeWidget::create_link_internal(const std::string &id_out,
+                                           const std::string &port_id_out,
+                                           const std::string &id_in,
+                                           const std::string &port_id_in)
+{
+  Logger::log()->trace("GraphNodeWidget::create_link_internal: {}/{} -> {}/{}",
+                       id_out,
+                       port_id_out,
+                       id_in,
+                       port_id_in);
+
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return;
+
+  // Verify endpoints exist
+  if (gno->is_node_id_available(id_out) || gno->is_node_id_available(id_in))
+  {
+    Logger::log()->warn("GraphNodeWidget::create_link_internal: endpoint missing");
+    return;
+  }
+
+  // Add graphics link
+  this->add_link(id_out, port_id_out, id_in, port_id_in);
+
+  // Add model link
+  gno->new_link(id_out, port_id_out, id_in, port_id_in);
+
+  // Trigger downstream compute
+  auto sorted = gno->get_nodes_to_update(id_in);
+  this->start_background_compute(sorted);
+}
+
+void GraphNodeWidget::remove_link_internal(const std::string &id_out,
+                                           const std::string &port_id_out,
+                                           const std::string &id_in,
+                                           const std::string &port_id_in)
+{
+  Logger::log()->trace("GraphNodeWidget::remove_link_internal: {}/{} -> {}/{}",
+                       id_out,
+                       port_id_out,
+                       id_in,
+                       port_id_in);
+
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return;
+
+  // Suppress undo pushes — this is called from undo/redo command replay
+  this->suppress_undo_ = true;
+
+  // Find and remove the graphics link. delete_graphics_link emits connection_deleted
+  // which calls on_connection_deleted, which handles model removal and graph update.
+  bool found = false;
+  for (QGraphicsItem *item : this->scene()->items())
+  {
+    if (auto *link = dynamic_cast<gngui::GraphicsLink *>(item))
+    {
+      if (link->get_node_out() && link->get_node_in() &&
+          link->get_node_out()->get_id() == id_out &&
+          link->get_node_in()->get_id() == id_in &&
+          link->get_node_out()->get_port_id(link->get_port_out_index()) == port_id_out &&
+          link->get_node_in()->get_port_id(link->get_port_in_index()) == port_id_in)
+      {
+        this->delete_graphics_link(link, false);
+        found = true;
+        break;
+      }
+    }
+  }
+
+  // If no graphics link was found (edge case), remove model link directly
+  if (!found)
+  {
+    gno->remove_link(id_out, port_id_out, id_in, port_id_in);
+
+    if (!gno->is_node_id_available(id_in))
+    {
+      auto sorted = gno->get_nodes_to_update(id_in);
+      this->start_background_compute(sorted);
+    }
+  }
+
+  this->suppress_undo_ = false;
 }
 
 // =====================================
