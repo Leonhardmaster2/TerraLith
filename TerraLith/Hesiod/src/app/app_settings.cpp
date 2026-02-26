@@ -149,6 +149,56 @@ void AppSettings::json_from(nlohmann::json const &json)
   json_safe_get(json, "viewer.width", viewer.width);
   json_safe_get(json, "viewer.height", viewer.height);
   json_safe_get(json, "viewer.add_heighmap_skirt", viewer.add_heighmap_skirt);
+  json_safe_get(json, "viewer.default_shadow_resolution", viewer.default_shadow_resolution);
+  json_safe_get(json, "viewer.msaa_level", viewer.msaa_level);
+
+  // 0.6: interface additions
+  json_safe_get(json, "interface.preview_type", interface.preview_type);
+  json_safe_get(json, "interface.preview_resolution", interface.preview_resolution);
+  json_safe_get(json, "interface.grid_style", interface.grid_style);
+  json_safe_get(json, "interface.show_category_icons", interface.show_category_icons);
+
+  // 0.6: performance settings
+  json_safe_get(json,
+                "performance.enable_smart_preview_cache",
+                performance.enable_smart_preview_cache);
+  json_safe_get(json,
+                "performance.cache_memory_limit_mb",
+                performance.cache_memory_limit_mb);
+  json_safe_get(json,
+                "performance.enable_incremental_evaluation",
+                performance.enable_incremental_evaluation);
+  json_safe_get(json,
+                "performance.default_resolution",
+                performance.default_resolution);
+  json_safe_get(json, "performance.default_tiling", performance.default_tiling);
+
+  // 0.6: vulkan settings
+  json_safe_get(json,
+                "vulkan.enable_vulkan_globally",
+                vulkan_settings.enable_vulkan_globally);
+  json_safe_get(json,
+                "vulkan.fallback_to_cpu_on_error",
+                vulkan_settings.fallback_to_cpu_on_error);
+  json_safe_get(json, "vulkan.device_selection", vulkan_settings.device_selection);
+
+  // 0.6: logging settings
+  json_safe_get(json,
+                "logging.terminal_logging_level",
+                logging_settings.terminal_logging_level);
+  json_safe_get(json, "logging.log_vulkan_timings", logging_settings.log_vulkan_timings);
+  json_safe_get(json,
+                "logging.show_stutter_warnings",
+                logging_settings.show_stutter_warnings);
+
+  // 0.6: node editor additions
+  json_safe_get(json,
+                "node_editor.node_rounding_radius",
+                node_editor.node_rounding_radius);
+  json_safe_get(json, "node_editor.port_size", node_editor.port_size);
+  json_safe_get(json,
+                "node_editor.fuzzy_search_aliases",
+                node_editor.fuzzy_search_aliases);
 
   // window
   {
@@ -217,6 +267,37 @@ nlohmann::json AppSettings::json_to() const
   json["viewer.width"] = viewer.width;
   json["viewer.height"] = viewer.height;
   json["viewer.add_heighmap_skirt"] = viewer.add_heighmap_skirt;
+  json["viewer.default_shadow_resolution"] = viewer.default_shadow_resolution;
+  json["viewer.msaa_level"] = viewer.msaa_level;
+
+  // 0.6: interface additions
+  json["interface.preview_type"] = interface.preview_type;
+  json["interface.preview_resolution"] = interface.preview_resolution;
+  json["interface.grid_style"] = interface.grid_style;
+  json["interface.show_category_icons"] = interface.show_category_icons;
+
+  // 0.6: performance
+  json["performance.enable_smart_preview_cache"] = performance.enable_smart_preview_cache;
+  json["performance.cache_memory_limit_mb"] = performance.cache_memory_limit_mb;
+  json["performance.enable_incremental_evaluation"] =
+      performance.enable_incremental_evaluation;
+  json["performance.default_resolution"] = performance.default_resolution;
+  json["performance.default_tiling"] = performance.default_tiling;
+
+  // 0.6: vulkan
+  json["vulkan.enable_vulkan_globally"] = vulkan_settings.enable_vulkan_globally;
+  json["vulkan.fallback_to_cpu_on_error"] = vulkan_settings.fallback_to_cpu_on_error;
+  json["vulkan.device_selection"] = vulkan_settings.device_selection;
+
+  // 0.6: logging
+  json["logging.terminal_logging_level"] = logging_settings.terminal_logging_level;
+  json["logging.log_vulkan_timings"] = logging_settings.log_vulkan_timings;
+  json["logging.show_stutter_warnings"] = logging_settings.show_stutter_warnings;
+
+  // 0.6: node editor additions
+  json["node_editor.node_rounding_radius"] = node_editor.node_rounding_radius;
+  json["node_editor.port_size"] = node_editor.port_size;
+  json["node_editor.fuzzy_search_aliases"] = node_editor.fuzzy_search_aliases;
 
   json["window.x"] = window.x;
   json["window.y"] = window.y;

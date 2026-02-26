@@ -53,6 +53,16 @@ DECLARE_NODE(thru)
 DECLARE_NODE(toggle)
 
 #ifndef HESIOD_MINIMAL_NODE_SET
+// 0.6 new geological/primitive nodes
+DECLARE_NODE(advanced_mountain_range)
+DECLARE_NODE(alpine_peaks)
+DECLARE_NODE(foothills_transition)
+DECLARE_NODE(glacier_formation)
+DECLARE_NODE(karst_terrain)
+DECLARE_NODE(lava_flow_field)
+DECLARE_NODE(stratified_erosion)
+DECLARE_NODE(tree_placement)
+
 DECLARE_NODE_VULKAN(abs)
 DECLARE_NODE(abs_smooth)
 DECLARE_NODE(accumulation_curvature)

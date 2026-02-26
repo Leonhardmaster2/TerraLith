@@ -727,10 +727,82 @@ bool GraphViewer::execute_new_node_context_menu()
         // determine who's visible
         std::map<std::string, bool> is_visible = {};
 
+        // Fuzzy search alias map: short aliases for common node types
+        static const std::map<std::string, std::vector<std::string>> alias_map = {
+            {"mtn", {"Mountain", "MountainCone", "MountainInselberg",
+                     "MountainRangeRadial", "MountainStump", "MountainTibesti",
+                     "AdvancedMountainRange", "AlpinePeaks"}},
+            {"mountain", {"Mountain", "MountainCone", "MountainInselberg",
+                          "MountainRangeRadial", "MountainStump", "MountainTibesti",
+                          "AdvancedMountainRange", "AlpinePeaks"}},
+            {"tree", {"TreePlacement"}},
+            {"forest", {"TreePlacement"}},
+            {"glacier", {"GlacierFormation"}},
+            {"ice", {"GlacierFormation"}},
+            {"karst", {"KarstTerrain"}},
+            {"cave", {"KarstTerrain"}},
+            {"sinkhole", {"KarstTerrain"}},
+            {"lava", {"LavaFlowField"}},
+            {"volcano", {"LavaFlowField", "Caldera", "Crater"}},
+            {"foothill", {"FoothillsTransition"}},
+            {"transition", {"FoothillsTransition"}},
+            {"strata", {"Strata", "StratifiedErosion", "Stratify"}},
+            {"layer", {"StratifiedErosion", "Strata"}},
+            {"ridge", {"NoiseRidged", "Ridgelines", "AlpinePeaks"}},
+            {"peak", {"ShatteredPeak", "AlpinePeaks", "AdvancedMountainRange"}},
+            {"alpine", {"AlpinePeaks"}},
+            {"erosion", {"Erosion", "StratifiedErosion", "GlacierFormation",
+                         "HydraulicParticle", "HydraulicStreamLog", "Thermal",
+                         "CoastalErosionDiffusion"}},
+            {"blend", {"Blend", "Blend3", "BlendPoissonBf", "Mixer"}},
+            {"fbm", {"NoiseFbm", "GaborWaveFbm", "VorolinesFbm",
+                     "PolygonFieldFbm", "VoronoiFbm", "HemisphereFieldFbm"}},
+            {"noise", {"Noise", "NoiseFbm", "NoiseIq", "NoiseJordan",
+                       "NoiseRidged", "NoiseSwiss", "NoisePingpong",
+                       "NoiseParberry", "WaveletNoise"}},
+            {"select", {"SelectAngle", "SelectSlope", "SelectCavities",
+                        "SelectGt", "SelectInterval", "SelectPulse",
+                        "SelectRivers", "SelectValley", "SelectMidrange"}},
+            {"export", {"ExportHeightmap", "ExportTexture", "ExportAsset",
+                        "ExportCloud", "ExportNormalMap", "ExportPath"}},
+            {"import", {"ImportHeightmap", "ImportTexture"}},
+            {"voronoi", {"Voronoi", "VoronoiFbm", "Voronoise", "Vororand",
+                         "Vorolines", "VorolinesFbm"}},
+        };
+
         for (const auto &[key, _] : this->node_inventory)
         {
           QString    key_qstr = QString::fromStdString(key);
-          const bool match = key_qstr.contains(text, Qt::CaseInsensitive);
+          bool       match = key_qstr.contains(text, Qt::CaseInsensitive);
+
+          // Also check category
+          if (!match)
+          {
+            auto cat_it = this->node_inventory.find(key);
+            if (cat_it != this->node_inventory.end())
+            {
+              QString cat_qstr = QString::fromStdString(cat_it->second);
+              match = cat_qstr.contains(text, Qt::CaseInsensitive);
+            }
+          }
+
+          // Check aliases
+          if (!match)
+          {
+            std::string text_lower = text.toLower().toStdString();
+            auto alias_it = alias_map.find(text_lower);
+            if (alias_it != alias_map.end())
+            {
+              for (const auto &alias_target : alias_it->second)
+              {
+                if (alias_target == key)
+                {
+                  match = true;
+                  break;
+                }
+              }
+            }
+          }
 
           if (text.isEmpty() || text.compare(" ") == 0)
             is_visible[key] = true;
