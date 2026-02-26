@@ -25,6 +25,7 @@
 #include "hesiod/gui/widgets/example_selector_dialog.hpp"
 #include "hesiod/gui/widgets/graph_manager_widget.hpp"
 #include "hesiod/gui/widgets/graph_editor_widget.hpp"
+#include "hesiod/gui/widgets/graph_node_widget.hpp"
 #include "hesiod/gui/widgets/graph_tabs_widget.hpp"
 #include "hesiod/gui/widgets/node_settings_widget.hpp"
 #include "hesiod/gui/widgets/viewers/viewer_3d.hpp"
@@ -813,6 +814,18 @@ void HesiodApplication::setup_menu_bar()
   quit->setIcon(HSD_ICON("exit_to_app"));
   file_menu->addAction(quit);
 
+  // --- edit (undo/redo)
+
+  QMenu *edit_menu = this->main_window->menuBar()->addMenu("&Edit");
+
+  auto *undo_action = new QAction("Undo", this);
+  undo_action->setShortcut(tr("Ctrl+Z"));
+  edit_menu->addAction(undo_action);
+
+  auto *redo_action = new QAction("Redo", this);
+  redo_action->setShortcut(tr("Ctrl+Shift+Z"));
+  edit_menu->addAction(redo_action);
+
   // --- project
 
   QMenu *project_menu = this->main_window->menuBar()->addMenu("&Project");
@@ -874,6 +887,43 @@ void HesiodApplication::setup_menu_bar()
   }
 
   // --- connections
+
+  // Edit menu: undo/redo — route to the active graph widget's undo stack
+  this->connect(undo_action,
+                &QAction::triggered,
+                this,
+                [this]()
+                {
+                  if (!this->project_ui)
+                    return;
+                  auto *tabs = this->project_ui->get_graph_tabs_widget_ref();
+                  if (!tabs)
+                    return;
+                  auto *editor = tabs->get_active_editor();
+                  if (!editor)
+                    return;
+                  auto *gnw = editor->get_graph_node_widget();
+                  if (gnw)
+                    gnw->on_undo_request();
+                });
+
+  this->connect(redo_action,
+                &QAction::triggered,
+                this,
+                [this]()
+                {
+                  if (!this->project_ui)
+                    return;
+                  auto *tabs = this->project_ui->get_graph_tabs_widget_ref();
+                  if (!tabs)
+                    return;
+                  auto *editor = tabs->get_active_editor();
+                  if (!editor)
+                    return;
+                  auto *gnw = editor->get_graph_node_widget();
+                  if (gnw)
+                    gnw->on_redo_request();
+                });
 
   this->connect(new_action, &QAction::triggered, this, &HesiodApplication::on_new);
   this->connect(load_action, &QAction::triggered, this, &HesiodApplication::on_load);
