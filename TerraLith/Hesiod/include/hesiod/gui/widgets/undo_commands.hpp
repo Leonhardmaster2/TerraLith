@@ -24,7 +24,9 @@ enum UndoCommandId
   CMD_ADD_LINK,
   CMD_REMOVE_LINK,
   CMD_MOVE_NODES,
-  CMD_CHANGE_PROPERTY, // property/attribute value change on a node
+  CMD_CHANGE_PROPERTY,    // property/attribute value change on a node
+  CMD_PASTE_NODES,        // paste / duplicate / import nodes
+  CMD_DROP_NODE_ON_LINK,  // insert node into existing link
 };
 
 // =====================================
@@ -185,6 +187,70 @@ private:
   nlohmann::json            old_attrs;
   nlohmann::json            new_attrs;
   bool                      first_redo = true;
+};
+
+// =====================================
+// PasteNodesCommand
+// =====================================
+// Captures a paste/duplicate/import operation. Stores the list of created node
+// IDs. On first undo a full snapshot (nodes + links) is captured so that
+// subsequent redo can restore with the SAME IDs (json_import would generate new
+// IDs, breaking any later commands that reference the originals).
+// On undo: captures snapshot, then deletes all pasted nodes.
+// On redo: restores from snapshot (preserving original IDs).
+class PasteNodesCommand : public QUndoCommand
+{
+public:
+  PasteNodesCommand(GraphNodeWidget         *widget,
+                    std::vector<std::string> created_node_ids,
+                    QUndoCommand            *parent = nullptr);
+
+  void undo() override;
+  void redo() override;
+  int  id() const override { return CMD_PASTE_NODES; }
+
+private:
+  QPointer<GraphNodeWidget> widget;
+  std::vector<std::string>  created_node_ids;
+  nlohmann::json            snapshot;  // captured on first undo for ID-preserving redo
+  bool                      first_redo = true;
+};
+
+// =====================================
+// DropNodeOnLinkCommand
+// =====================================
+// Captures a node-dropped-on-link operation (remove 1 link, create 2 links).
+// On undo: removes the 2 new links and recreates the original link.
+// On redo: removes the original link and creates the 2 new links.
+class DropNodeOnLinkCommand : public QUndoCommand
+{
+public:
+  DropNodeOnLinkCommand(GraphNodeWidget   *widget,
+                        const std::string &original_out_id,
+                        const std::string &original_out_port,
+                        const std::string &original_in_id,
+                        const std::string &original_in_port,
+                        const std::string &dropped_node_id,
+                        const std::string &dropped_in_port,
+                        const std::string &dropped_out_port,
+                        QUndoCommand      *parent = nullptr);
+
+  void undo() override;
+  void redo() override;
+  int  id() const override { return CMD_DROP_NODE_ON_LINK; }
+
+private:
+  QPointer<GraphNodeWidget> widget;
+  // Original link that was broken
+  std::string original_out_id;
+  std::string original_out_port;
+  std::string original_in_id;
+  std::string original_in_port;
+  // Dropped node and its ports
+  std::string dropped_node_id;
+  std::string dropped_in_port;
+  std::string dropped_out_port;
+  bool        first_redo = true;
 };
 
 } // namespace hesiod

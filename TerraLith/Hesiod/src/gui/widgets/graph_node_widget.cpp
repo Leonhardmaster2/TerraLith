@@ -470,7 +470,20 @@ void GraphNodeWidget::on_connection_dropped(const std::string &node_id,
         if (to_type == from_type)
         {
           std::string port_to_id = p_node_to->get_port_label(k);
+
+          // Create both graphics and model links
           this->add_link(node_id, port_id, node_to, port_to_id);
+          gno->new_link(node_id, port_id, node_to, port_to_id);
+
+          // Push undo command for the auto-created link
+          if (this->undo_stack)
+            this->undo_stack->push(
+                new AddLinkCommand(this, node_id, port_id, node_to, port_to_id));
+
+          // Trigger compute for the connected node
+          auto sorted = gno->get_nodes_to_update(node_to);
+          this->start_background_compute(sorted);
+
           break;
         }
       }
@@ -614,13 +627,21 @@ void GraphNodeWidget::on_graph_import_request()
 
     nlohmann::json json_mod = this->json_import(json_imp);
 
+    // Collect created node IDs and push undo command
+    std::vector<std::string> created_ids;
+    if (json_mod.contains("nodes"))
+      for (auto &json_node : json_mod["nodes"])
+        created_ids.push_back(json_node["id"].get<std::string>());
+
+    if (!created_ids.empty() && this->undo_stack)
+      this->undo_stack->push(new PasteNodesCommand(this, created_ids));
+
     // set selection on copied nodes
     this->deselect_all();
 
-    for (auto &json_node : json_mod["nodes"])
+    for (auto &id : created_ids)
     {
-      const std::string    node_id = json_node["id"].get<std::string>();
-      gngui::GraphicsNode *p_gfx_node = this->get_graphics_node_by_id(node_id);
+      gngui::GraphicsNode *p_gfx_node = this->get_graphics_node_by_id(id);
 
       // Qt mystery, this needs to be delayed to be effective
       QTimer::singleShot(0,
@@ -817,6 +838,9 @@ void GraphNodeWidget::on_node_dropped_on_link(const std::string &dropped_node_id
     return;
   }
 
+  // Suppress individual undo commands — we push a single compound command below
+  this->suppress_undo_ = true;
+
   // 1. Delete the original link (both graphics and model)
   gngui::GraphicsLink *p_gfx_link = nullptr;
   for (QGraphicsItem *item : this->scene()->items())
@@ -851,6 +875,19 @@ void GraphNodeWidget::on_node_dropped_on_link(const std::string &dropped_node_id
   // 3. Create link: dropped_node_output -> original_target
   this->add_link(dropped_node_id, dropped_out_port_id, link_in_id, link_in_port_id);
   gno->new_link(dropped_node_id, dropped_out_port_id, link_in_id, link_in_port_id);
+
+  this->suppress_undo_ = false;
+
+  // Push compound undo command
+  if (this->undo_stack)
+    this->undo_stack->push(new DropNodeOnLinkCommand(this,
+                                                      link_out_id,
+                                                      link_out_port_id,
+                                                      link_in_id,
+                                                      link_in_port_id,
+                                                      dropped_node_id,
+                                                      dropped_in_port_id,
+                                                      dropped_out_port_id));
 
   // 4. Trigger graph update from the dropped node
   {
@@ -1077,13 +1114,21 @@ void GraphNodeWidget::on_nodes_paste_request()
   // returned json contains modified node IDs
   nlohmann::json json_mod = this->json_import(this->json_copy_buffer, mouse_scene_pos);
 
+  // Collect created node IDs and push undo command
+  std::vector<std::string> created_ids;
+  if (json_mod.contains("nodes"))
+    for (auto &json_node : json_mod["nodes"])
+      created_ids.push_back(json_node["id"].get<std::string>());
+
+  if (!created_ids.empty() && this->undo_stack)
+    this->undo_stack->push(new PasteNodesCommand(this, created_ids));
+
   // set selection on copied nodes
   this->deselect_all();
 
-  for (auto &json_node : json_mod["nodes"])
+  for (auto &id : created_ids)
   {
-    const std::string    node_id = json_node["id"].get<std::string>();
-    gngui::GraphicsNode *p_gfx_node = this->get_graphics_node_by_id(node_id);
+    gngui::GraphicsNode *p_gfx_node = this->get_graphics_node_by_id(id);
     if (p_gfx_node)
       p_gfx_node->setSelected(true);
   }
@@ -1637,6 +1682,67 @@ void GraphNodeWidget::restore_node_attributes(const std::string    &node_id,
   // Trigger recompute from this node onwards
   auto sorted = gno->get_nodes_to_update(node_id);
   this->start_background_compute(sorted);
+}
+
+nlohmann::json GraphNodeWidget::build_nodes_snapshot(
+    const std::vector<std::string> &node_ids)
+{
+  Logger::log()->trace("GraphNodeWidget::build_nodes_snapshot");
+
+  nlohmann::json snapshot;
+  snapshot["nodes"] = nlohmann::json::array();
+  snapshot["internal_links"] = nlohmann::json::array();
+  snapshot["external_links"] = nlohmann::json::array();
+
+  auto gno = this->p_graph_node.lock();
+  if (!gno)
+    return snapshot;
+
+  // Serialize each node
+  for (auto &id : node_ids)
+  {
+    gngui::GraphicsNode *p_gfx = this->get_graphics_node_by_id(id);
+    BaseNode            *p_node = gno->get_node_ref_by_id<BaseNode>(id);
+    if (!p_gfx || !p_node)
+      continue;
+
+    nlohmann::json json_node = p_gfx->json_to();
+
+    QPointF pos = p_gfx->scenePos();
+    json_node["scene_position.x"] = pos.x();
+    json_node["scene_position.y"] = pos.y();
+    json_node["settings"] = p_node->json_to();
+
+    snapshot["nodes"].push_back(json_node);
+  }
+
+  // Capture links touching these nodes
+  for (auto &link : gno->get_links())
+  {
+    bool from_in_set = contains(node_ids, link.from);
+    bool to_in_set = contains(node_ids, link.to);
+
+    if (!from_in_set && !to_in_set)
+      continue;
+
+    gnode::Node *p_from = gno->get_node_ref_by_id(link.from);
+    gnode::Node *p_to = gno->get_node_ref_by_id(link.to);
+    if (!p_from || !p_to)
+      continue;
+
+    nlohmann::json json_link;
+    json_link["node_out_id"] = link.from;
+    json_link["node_in_id"] = link.to;
+    json_link["port_out_id"] = p_from->get_port_label(link.port_from);
+    json_link["port_in_id"] = p_to->get_port_label(link.port_to);
+
+    if (from_in_set && to_in_set)
+      snapshot["internal_links"].push_back(json_link);
+    else
+      snapshot["external_links"].push_back(json_link);
+  }
+
+  return snapshot;
 }
 
 // =====================================
