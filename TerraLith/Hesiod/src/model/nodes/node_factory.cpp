@@ -155,6 +155,8 @@ std::map<std::string, std::string> get_node_inventory()
       {"Abs", "Math/Base"},
       {"AbsSmooth", "Math/Base"},
       {"AccumulationCurvature", "Features/Landform"},
+      {"AdvancedMountainRange", "Primitive/Geological"},
+      {"AlpinePeaks", "Primitive/Geological"},
       {"Badlands", "Primitive/Geological"},
       {"BasaltField", "Primitive/Geological"},
       {"Blend", "Operator/Blend"},
@@ -236,7 +238,9 @@ std::map<std::string, std::string> get_node_inventory()
       {"FloodingUniformLevel", "Hydrology"},
       {"FlowStream", "WIP"}, // Hydrology
       {"Fold", "Filter/Recast"},
+      {"FoothillsTransition", "Primitive/Geological"},
       {"GaborWaveFbm", "Primitive/Coherent"},
+      {"GlacierFormation", "Erosion"},
       {"Gain", "Filter/Recurve"},
       {"GammaCorrection", "Filter/Recurve"},
       {"GammaCorrectionLocal", "Filter/Recurve"},
@@ -266,6 +270,7 @@ std::map<std::string, std::string> get_node_inventory()
       {"Inverse", "Math/Base"},
       {"Island", "Primitive/Geological"},
       {"IslandLandMask", "Primitive/Geological"},
+      {"KarstTerrain", "Erosion"},
       {"KernelDiskSmooth", "Primitive/Kernel"},
       {"KernelGabor", "Primitive/Kernel"},
       {"KernelPrim", "Primitive/Kernel"},
@@ -273,6 +278,7 @@ std::map<std::string, std::string> get_node_inventory()
       {"KmeansClustering3", "Features/Clustering"},
       {"Kuwahara", "WIP"}, // Filter/Smoothing
       {"Laplace", "Filter/Smoothing"},
+      {"LavaFlowField", "Primitive/Geological"},
       {"Lerp", "Math/Base"},
       // {"LevelSetCurvature", "Features"},
       {"MakeBinary", "Operator/Morphology"},
@@ -391,6 +397,7 @@ std::map<std::string, std::string> get_node_inventory()
       {"SteepenConvective", "Filter/Recast"},
       {"Step", "Primitive/Function"},
       {"Strata", "Erosion/Stratify"},
+      {"StratifiedErosion", "Erosion"},
       {"Stratify", "WIP"},           // "Erosion/Stratify"},
       {"StratifyOblique", "WIP"},    // "Erosion/Stratify"},
       {"StratifyMultiscale", "WIP"}, // "Erosion/Stratify"},
@@ -414,6 +421,7 @@ std::map<std::string, std::string> get_node_inventory()
       {"Toggle", "Routing"},
       {"Transfer", "Operator/Blend"},
       {"Translate", "Operator/Transform"},
+      {"TreePlacement", "Biomes"},
       {"Unsphericity", "Features/Landform"},
       {"ValleyWidth", "Features/Landform"},
       {"Vorolines", "Primitive/Coherent"},
@@ -482,6 +490,16 @@ std::shared_ptr<gnode::Node> node_factory(const std::string         &node_type,
     SETUP_NODE(Thru, thru);
 
 #ifndef HESIOD_MINIMAL_NODE_SET
+    // 0.6 new geological/primitive nodes
+    SETUP_NODE(AdvancedMountainRange, advanced_mountain_range);
+    SETUP_NODE(AlpinePeaks, alpine_peaks);
+    SETUP_NODE(FoothillsTransition, foothills_transition);
+    SETUP_NODE(GlacierFormation, glacier_formation);
+    SETUP_NODE(KarstTerrain, karst_terrain);
+    SETUP_NODE(LavaFlowField, lava_flow_field);
+    SETUP_NODE(StratifiedErosion, stratified_erosion);
+    SETUP_NODE(TreePlacement, tree_placement);
+
     SETUP_NODE_VULKAN(Abs, abs);
     SETUP_NODE(AbsSmooth, abs_smooth);
     SETUP_NODE(AccumulationCurvature, accumulation_curvature);

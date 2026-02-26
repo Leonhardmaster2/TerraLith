@@ -32,6 +32,9 @@
 #include "hesiod/gui/widgets/project_settings_dialog.hpp"
 #include "hesiod/gui/widgets/splash_screen.hpp"
 #include "hesiod/gui/widgets/tool_tip_blocker.hpp"
+#include "hesiod/core/preview_cache_manager.hpp"
+#include "hesiod/core/settings_manager.hpp"
+#include "hesiod/core/terminal_logger.hpp"
 #include "hesiod/logger.hpp"
 #include "hesiod/model/constants/cmap.hpp"
 #include "hesiod/model/constants/color_gradient.hpp"
@@ -82,6 +85,31 @@ HesiodApplication::HesiodApplication(int &argc, char **argv) : QApplication(argc
   splash->show_message("Initializing application context...");
 
   this->context.initialize();
+
+  // Initialize 0.6 core managers
+  splash->show_message("Initializing settings manager...");
+
+  SettingsManager::instance().load();
+
+  // Sync SettingsManager with AppSettings
+  auto &sm = SettingsManager::instance();
+  sm.logging.terminal_logging_level = this->context.app_settings.logging_settings.terminal_logging_level;
+  sm.logging.log_vulkan_timings = this->context.app_settings.logging_settings.log_vulkan_timings;
+  sm.logging.show_stutter_warnings = this->context.app_settings.logging_settings.show_stutter_warnings;
+  sm.performance.cache_memory_limit_mb = this->context.app_settings.performance.cache_memory_limit_mb;
+  sm.performance.enable_smart_preview_cache = this->context.app_settings.performance.enable_smart_preview_cache;
+
+  // Initialize terminal logger with settings
+  auto &tl = TerminalLogger::instance();
+  tl.set_logging_level(sm.logging.terminal_logging_level);
+  tl.set_log_vulkan_timings(sm.logging.log_vulkan_timings);
+  tl.set_show_stutter_warnings(sm.logging.show_stutter_warnings);
+
+  // Initialize preview cache with memory limit
+  auto &pcm = PreviewCacheManager::instance();
+  pcm.set_memory_limit_mb(sm.performance.cache_memory_limit_mb);
+
+  Logger::log()->info("Hesiod 0.6 core managers initialized");
 
   // apply style
   this->setWindowIcon(QIcon(this->context.app_settings.global.icon_path.c_str()));

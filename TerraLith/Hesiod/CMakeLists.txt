@@ -1,6 +1,13 @@
 project(hesiod LANGUAGES CXX)
 
 # ------------------------------
+# Hesiod 0.6 feature options
+# ------------------------------
+option(HESIOD_ENABLE_SMART_PREVIEW_CACHE "Enable smart preview cache system" ON)
+option(HESIOD_ENABLE_TERMINAL_LOGGING "Enable enhanced terminal logging" ON)
+option(HESIOD_ENABLE_NODE_EDITOR_POLISH "Enable node editor visual polish" ON)
+
+# ------------------------------
 # Qt6 setup
 # ------------------------------
 set(CMAKE_AUTOMOC ON)
@@ -73,6 +80,17 @@ target_include_directories(
 # Compiler features
 # ------------------------------
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_20)
+
+# Hesiod 0.6 feature definitions
+if(HESIOD_ENABLE_SMART_PREVIEW_CACHE)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HESIOD_HAS_SMART_PREVIEW_CACHE)
+endif()
+if(HESIOD_ENABLE_TERMINAL_LOGGING)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HESIOD_HAS_TERMINAL_LOGGING)
+endif()
+if(HESIOD_ENABLE_NODE_EDITOR_POLISH)
+  target_compile_definitions(${PROJECT_NAME} PRIVATE HESIOD_HAS_NODE_EDITOR_POLISH)
+endif()
 
 # ------------------------------
 # Link libraries

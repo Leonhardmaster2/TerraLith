@@ -71,7 +71,39 @@ struct AppSettings
     bool enable_texture_downloader = true;
     bool enable_tool_tips = true;
     bool enable_example_selector_at_startup = true;
+
+    // 0.6 additions
+    int  preview_type = 2;       // 0=Gray, 1=Magma, 2=Terrain(hillshade), 3=Histogram
+    int  preview_resolution = 256; // 128, 256, 512
+    int  grid_style = 2;         // 0=None, 1=Classic, 2=Blueprint subtle
+    bool show_category_icons = true;
   } interface;
+
+  // 0.6: Performance tab settings
+  struct Performance
+  {
+    bool enable_smart_preview_cache = true;
+    int  cache_memory_limit_mb = 512;
+    bool enable_incremental_evaluation = true;
+    int  default_resolution = 2048;  // 1024, 2048, 4096, 8192
+    int  default_tiling = 4;         // 2x2, 4x4, 8x8
+  } performance;
+
+  // 0.6: Vulkan tab settings
+  struct VulkanSettings
+  {
+    bool        enable_vulkan_globally = true;
+    bool        fallback_to_cpu_on_error = true;
+    std::string device_selection = "Auto";
+  } vulkan_settings;
+
+  // 0.6: Logging tab settings
+  struct LoggingSettings
+  {
+    int  terminal_logging_level = 2; // 0=Silent, 1=Warning, 2=Info, 3=Debug, 4=Verbose
+    bool log_vulkan_timings = true;
+    bool show_stutter_warnings = true;
+  } logging_settings;
 
   struct NodeEditor
   {
@@ -82,7 +114,7 @@ struct AppSettings
     int         preview_w = 128;
     int         preview_h = 128;
     std::string doc_path = "data/node_documentation.json";
-    float       position_delta_when_duplicating_node = 200.f;
+    float       position_delta_when_duplicating_node = 220.f;
     float       auto_layout_dx = 256.f;
     float       auto_layout_dy = 384.f;
     bool        show_node_settings_pan = true;
@@ -90,6 +122,11 @@ struct AppSettings
     int         max_bake_resolution = 8192 * 4;
     bool        disable_during_update = false;
     bool        enable_node_groups = true;
+
+    // 0.6 additions
+    int  node_rounding_radius = 8; // 0-16 px
+    int  port_size = 22;           // hit area
+    bool fuzzy_search_aliases = true;
   } node_editor;
 
   struct Viewer
@@ -97,6 +134,10 @@ struct AppSettings
     int  width = 512;
     int  height = 512;
     bool add_heighmap_skirt = true;
+
+    // 0.6 additions
+    int  default_shadow_resolution = 2048; // 1024, 2048, 4096, 8192 (prevents crash)
+    int  msaa_level = 2;                   // 0=Off, 1=2x, 2=4x, 3=8x
   } viewer;
 
   struct Window // main window

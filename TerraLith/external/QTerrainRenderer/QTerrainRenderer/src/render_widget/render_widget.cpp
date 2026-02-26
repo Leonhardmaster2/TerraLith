@@ -616,7 +616,18 @@ void RenderWidget::set_shadow_map_resolution(int resolution)
   if (resolution == this->shadow_map_resolution)
     return;
 
+  // Clamp to safe range (prevents crash from invalid resolution values)
+  resolution = std::clamp(resolution, 256, 8192);
+
   this->shadow_map_resolution = resolution;
+
+  // Guard: ensure OpenGL context is valid before manipulating GPU resources
+  if (!this->context() || !this->context()->isValid())
+  {
+    qtr::Logger::log()->warn("set_shadow_map_resolution: no valid GL context, deferring");
+    this->need_update = true;
+    return;
+  }
 
   this->makeCurrent();
 
