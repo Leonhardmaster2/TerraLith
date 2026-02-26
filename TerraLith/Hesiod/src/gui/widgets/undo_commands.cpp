@@ -242,4 +242,41 @@ bool MoveNodesCommand::mergeWith(const QUndoCommand *other)
   return true;
 }
 
+// =====================================
+// PropertyChangeCommand
+// =====================================
+
+PropertyChangeCommand::PropertyChangeCommand(GraphNodeWidget   *widget,
+                                             const std::string &node_id,
+                                             nlohmann::json     old_attrs,
+                                             nlohmann::json     new_attrs,
+                                             QUndoCommand      *parent)
+    : QUndoCommand(parent), widget(widget), node_id(node_id),
+      old_attrs(std::move(old_attrs)), new_attrs(std::move(new_attrs))
+{
+  setText("Change Property");
+}
+
+void PropertyChangeCommand::undo()
+{
+  if (!widget)
+    return;
+
+  widget->restore_node_attributes(node_id, old_attrs);
+}
+
+void PropertyChangeCommand::redo()
+{
+  if (!widget)
+    return;
+
+  if (first_redo)
+  {
+    first_redo = false;
+    return;
+  }
+
+  widget->restore_node_attributes(node_id, new_attrs);
+}
+
 } // namespace hesiod

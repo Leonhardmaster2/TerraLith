@@ -130,6 +130,8 @@ public slots:
                             const std::string &port_id_out,
                             const std::string &id_in,
                             const std::string &port_id_in);
+  void restore_node_attributes(const std::string    &node_id,
+                               const nlohmann::json &attrs_json);
 
   // --- Others... ---
   void on_new_graphics_node_request(const std::string &node_id, QPointF scene_pos);
